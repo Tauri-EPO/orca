@@ -9739,18 +9739,19 @@
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
       "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["local"],
-      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units cover CLI intent, fresh Claude/Codex/cursor-agent foreground identity, provider-unwrapped cursor-agent names, framing bytes, stale-agent shell fallback, no wrapper polling, and exact legacy behavior for every other configured agent. SSH, daemon, and remote-runtime remain explicit gaps.",
+      "coverageNotes": "Source-built macOS and physical Windows Electron journeys cover the public CLI through RPC, runtime identity, real PTY/ConPTY writes, and a delayed fake Codex composer. Focused units cover CLI intent, fresh Claude/Codex/cursor-agent foreground identity, provider-unwrapped cursor-agent names, framing bytes, stale-agent shell fallback, no wrapper polling, and exact legacy behavior for every other configured agent. One live Windows journey on b6842cc176 sent a 2,834-byte public CLI prompt to authenticated cursor-agent v2026.08.11-e8db854 through an isolated source-built runtime. SSH, daemon, and remote-runtime remain explicit gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-4328",
         "https://github.com/stablyai/orca/issues/14525"
       ],
       "invariant": "A public CLI send containing non-empty text plus Enter and no interrupt identifies agent-prompt intent. The owning runtime uses bracketed-paste and settled submit only when a fresh foreground-process read positively identifies the exact target as Claude, Codex, or cursor-agent on a desktop call; every other agent, unresolved node wrappers, stale agent metadata over a shell, text-only input, bare Enter, interrupts, mobile input, query replies, and older clients keep the direct terminal contract.",
-      "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units require CLI intent only for text plus Enter, settlement only for freshly identified Claude/Codex/cursor-agent, the legacy platform delay for every other configured agent, stale Codex launch identity over a shell to fall back, no wrapper polling even when a Cursor title sits behind node, and byte-for-byte direct delivery for non-targets.",
+      "oracle": "Launch a bare fake Codex through the real Electron PTY and delay its composer render for 1,200 ms, beyond the legacy generic 500 ms gap. Send a 557-byte prompt with the public CLI and require the marker, zero premature Enter, no rescue Enter, and one submission. POSIX child stdin must retain one bracketed-paste frame; Windows ConPTY consumes that control frame, so runtime tests require the frame at the PTY write boundary while the Windows child requires the exact prompt. The same harness against the installed pre-fix runtime must record one premature Enter and require one bare rescue Enter. Focused units require CLI intent only for text plus Enter, settlement only for freshly identified Claude/Codex/cursor-agent, the legacy platform delay for every other configured agent, stale Codex launch identity over a shell to fall back, no wrapper polling even when a Cursor title sits behind node, and byte-for-byte direct delivery for non-targets. A separate live Windows journey launches authenticated cursor-agent in an isolated source-built runtime and requires one public CLI send, the 8s settlement fallback rather than the 1.5s legacy delay, one bracketed-paste frame, paste index #1, and a Working/Cursor Agent transition with no rescue Enter.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/terminal.test.ts src/main/runtime/rpc/terminal-agent-prompt-send.test.ts src/main/runtime/rpc/terminal-send.test.ts src/main/runtime/orca-runtime.test.ts src/shared/agent-prompt-injection.test.ts",
         "pnpm run build:cli && pnpm exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "pnpm.cmd exec playwright test tests/e2e/terminal-send-agent-prompt-submit.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
-        "node tests/tools/repro-terminal-send-submit.mjs --cli orca --worktree <registered-worktree> --discard-report"
+        "node tests/tools/repro-terminal-send-submit.mjs --cli orca --worktree <registered-worktree> --discard-report",
+        "Isolated Windows source-built Electron plus public CLI: orca-dev terminal create --command cursor-agent --force --trust; orca-dev terminal wait --for tui-idle; orca-dev terminal send --text <2834-byte prompt> --enter"
       ],
       "testFiles": [
         "src/cli/handlers/terminal.test.ts",
@@ -9840,6 +9841,15 @@
           "result": "passed",
           "durationSeconds": 18.38,
           "summary": "Cursor follow-up mutant was red on main (provider-unwrapped cursor-agent identity returned false). After adding cursor to the settlement allowlist, the focused CLI/RPC/runtime suite passed 1,205 tests, including cursor marker-gated submit, stale Cursor shell fallback, and a single-shot node wrapper that stays on the legacy path."
+        },
+        {
+          "date": "2026-08-16",
+          "runner": "manual",
+          "platform": "windows",
+          "command": "Isolated Windows source-built Electron plus public CLI: orca-dev terminal create --command cursor-agent --force --trust; orca-dev terminal wait --for tui-idle; orca-dev terminal send --text <2834-byte prompt> --enter",
+          "result": "passed",
+          "durationSeconds": 134,
+          "summary": "Head b6842cc176 live authenticated cursor-agent v2026.08.11-e8db854: one 2,834-byte public CLI send accepted in 8.53s (settlement fallback, not the 1.5s Windows legacy delay), 2,847 bytes written (one bracketed-paste frame), PTY went idle composer to [Pasted text #1 +5 lines] plus Working/Cursor Agent, rescueSent=false. Packaged Orca 1.4.183 stayed on pid 34156 / runtimeId 8eb31102-4988-4a3d-8d0b-b74fac9cacf9. No live mutant was run against 1.4.183; CDP showed the landing page because the PTY was unfocused."
         }
       ],
       "runtimeBudget": {
@@ -9848,11 +9858,11 @@
       },
       "flakeHistory": {
         "status": "unknown",
-        "evidence": "The final oracle passed twice in independent macOS app launches and twice on physical Windows. A shared --repeat-each fixture mode failed before test execution because only one seeded worktree loaded; supported isolated invocations were used for product evidence. CI history is not yet collected."
+        "evidence": "The fake-composer oracle passed twice in independent macOS app launches and twice on physical Windows. One live authenticated cursor-agent Windows CLI send on b6842cc176 also submitted once with no rescue Enter. A shared --repeat-each fixture mode failed before test execution because only one seeded worktree loaded; supported isolated invocations were used for product evidence. CI history is not yet collected."
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The fake-composer oracle was red against the installed pre-fix runtime with prematureEnters=1 and rescueSent=true. It also caught a source-built late-identity race with a complete paste frame but one premature Enter before the render gate began resolving foreground identity. The final candidate is green on macOS and Windows with prematureEnters=0 and rescueSent=false."
+        "evidence": "The fake-composer oracle was red against the installed pre-fix runtime with prematureEnters=1 and rescueSent=true. It also caught a source-built late-identity race with a complete paste frame but one premature Enter before the render gate began resolving foreground identity. The final candidate is green on macOS and Windows with prematureEnters=0 and rescueSent=false. Focused cursor-agent units were red on main (provider-unwrapped cursor-agent identity returned false) and green after the allowlist change. A live authenticated cursor-agent Windows CLI send on b6842cc176 is green on the candidate (8.53s settlement fallback, one paste frame, Working, rescueSent=false). Packaged 1.4.183 was left untouched, so the live cursor mutant remains unrun."
       },
       "performanceBudget": {
         "required": true,
@@ -9866,7 +9876,8 @@
         "Live SSH/daemon/remote-runtime evidence is not yet attached.",
         "OpenCode and other non-target agents retain the legacy behavior until independently validated; unresolved node wrappers still fail open without polling.",
         "A new CLI talking to an old host safely loses the optional field and therefore keeps the old timing behavior until the host updates.",
-        "The E2E fake agent models the submission race without requiring external agent authentication; live account-backed agents are covered separately."
+        "The E2E fake agent models the Codex submission race without requiring external agent authentication; it does not launch a cursor-agent composer.",
+        "Live authenticated cursor-agent submit is proven on one isolated Windows CLI send at b6842cc176; CDP could not screenshot the unfocused PTY, the agent was still Working at teardown, and no live mutant was run against packaged 1.4.183."
       ],
       "demotionRule": "Keep experimental or demote to protection none if direct shell/mobile/query input is reframed, an unrecognized target receives bracketed paste, a prompt can emit duplicate Enter, mixed-version decoding rejects the optional field, or the deterministic fake-composer candidate requires a rescue send."
     },
@@ -9886,9 +9897,9 @@
       ],
       "platforms": ["macos", "linux", "windows"],
       "providers": ["local", "daemon", "ssh", "remote-runtime"],
-      "coveredPlatforms": ["macos"],
+      "coveredPlatforms": ["macos", "windows"],
       "coveredProviders": ["local"],
-      "coverageNotes": "Local macOS evidence covers the runtime PTY write contract, live Codex orchestration, a dev-runtime CLI repro, and Claude and Codex composer traces. The render gate stays on the PTY-owning runtime, so paired and SSH callers use the same provider write/output path without a wire change. SSH, daemon, remote-runtime, Linux, and Windows live journeys remain gaps.",
+      "coverageNotes": "Local macOS evidence covers the runtime PTY write contract, live Codex orchestration, a dev-runtime CLI repro, and Claude and Codex composer traces. After the cursor-agent allowlist change, the same focused runtime/orchestration suite also passed on Windows, including marker-gated Cursor submit. The render gate stays on the PTY-owning runtime, so paired and SSH callers use the same provider write/output path without a wire change. Live authenticated cursor-agent CLI send is recorded on terminal-input.cli-agent-prompt-submit; this gate's live orchestration dispatch, SSH, daemon, remote-runtime, and Linux journeys remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/7226",
         "https://github.com/stablyai/orca/issues/13821",
@@ -9956,6 +9967,15 @@
       ],
       "evidenceRuns": [
         {
+          "date": "2026-08-16",
+          "runner": "local",
+          "platform": "windows",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/agent-prompt-injection.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/rpc/methods/orchestration-tasks-dispatch.test.ts src/main/runtime/orchestration/coordinator.test.ts",
+          "result": "passed",
+          "durationSeconds": 56.2,
+          "summary": "After the cursor-agent allowlist change, 4 files and 1,229 tests passed on Windows, including marker-gated Cursor submit, stale Cursor shell fallback, and the existing Claude/Codex/orchestration contracts. This is post-fix evidence for the cursor claims this gate's 2026-07-07 through 2026-08-14 entries could not have exercised."
+        },
+        {
           "date": "2026-08-14",
           "runner": "local",
           "platform": "macos",
@@ -10007,15 +10027,15 @@
       },
       "flakeHistory": {
         "status": "unknown",
-        "evidence": "First local macOS evidence only; needs repeated dev-runtime harness runs and provider matrix evidence before promotion."
+        "evidence": "macOS runtime/orchestration evidence plus one Windows post-cursor-fix suite (4 files, 1,229 passed). Needs repeated live orchestration dispatch and provider matrix evidence before promotion."
       },
       "redGreenEvidence": {
         "status": "partial",
-        "evidence": "The original Claude-shaped oracle fails on unmodified main and passes with the render gate. The hardened multi-frame oracle then fails on the first-marker candidate, which submits at 751 ms during an intermediate frame, and passes when the gate requires post-marker quiescence. Codex used the legacy platform delay before this candidate; the late-marker oracle proves the original deadline would pre-empt slow-host settlement without re-arming. The earlier live harness also reproduced the unsafe raw multiline contract before its framing fix. Intentional-break evidence remains local rather than a separate CI job."
+        "evidence": "The original Claude-shaped oracle fails on unmodified main and passes with the render gate. The hardened multi-frame oracle then fails on the first-marker candidate, which submits at 751 ms during an intermediate frame, and passes when the gate requires post-marker quiescence. Codex used the legacy platform delay before this candidate; the late-marker oracle proves the original deadline would pre-empt slow-host settlement without re-arming. The cursor-agent settlement allowlist mutant is red on main (provider-unwrapped cursor-agent identity returned false) and green on the candidate in the shared runtime suite. The earlier live harness also reproduced the unsafe raw multiline contract before its framing fix. Intentional-break evidence remains local rather than a separate CI job."
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "Agent prompt dispatch remains O(prompt bytes) with existing 16KB chunking. Claude and Codex add one PTY-local output listener until 1.5 seconds of post-marker output quiescence or the bounded fallback; each later frame resets one quiet timer. Other agents retain the platform delay. No polling, provider listing, subprocess churn, hidden-pane wakeups, renderer work, or wire traffic is added."
+        "evidence": "Agent prompt dispatch remains O(prompt bytes) with existing 16KB chunking. Claude, Codex, and cursor-agent add one PTY-local output listener until 1.5 seconds of post-marker output quiescence or the bounded fallback; each later frame resets one quiet timer. Other agents retain the platform delay. No polling, provider listing, subprocess churn, hidden-pane wakeups, renderer work, or wire traffic is added."
       },
       "promotionCriteria": [
         "Run the live harness in soak with a self-starting dev runtime or provider-contract fixture.",
@@ -10024,7 +10044,7 @@
       ],
       "knownGaps": [
         "Live harness command currently expects an already-running dev runtime and generated out/bin/orca-dev wrapper.",
-        "No Windows ConPTY, Linux PTY, SSH, daemon, or remote-runtime live evidence yet.",
+        "No live Windows orchestration dispatch, Linux PTY, SSH, daemon, or remote-runtime evidence yet. Live authenticated cursor-agent submit is recorded on terminal-input.cli-agent-prompt-submit, not this orchestration dispatch oracle.",
         "Push-on-idle orchestration message banners remain outside this dispatch-prompt gate."
       ],
       "demotionRule": "Demote or quarantine if the live harness flakes without a product bug or harness bug filed to the terminal-input owner."
