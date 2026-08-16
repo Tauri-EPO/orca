@@ -307,6 +307,15 @@ describe('orchestration skill guidance', () => {
       'orca orchestration worker-start --task <task_a> --agent codex --json'
     )
     expect(workerLoop).not.toContain('--worktree current')
+    // The Run-level choice is only expressible while both placements stay documented.
+    expect(workerLoop).toContain(
+      'orca orchestration worker-start --task <task_id> --worktree new-child --name <name> ' +
+        '--agent codex --setup run --json'
+    )
+    expect(workerLoop).toContain(
+      'orca orchestration worker-start --task <task_id> --worktree new-top-level --name <name> ' +
+        '--agent codex --setup run --json'
+    )
   })
 
   it('documents per-invocation model and effort for supervised workers', () => {
