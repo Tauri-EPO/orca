@@ -136,3 +136,32 @@ export async function attachFleetEcho<T extends object>(
     return result
   }
 }
+
+/** The Run the calling terminal is bound to, or null when it is bound to none. */
+export function resolveCallerRunId(
+  runtime: OrcaRuntimeService,
+  callerTerminalHandle: string | undefined
+): string | null {
+  if (!callerTerminalHandle) {
+    return null
+  }
+  const paneKey = runtime.getTerminalPaneKey(callerTerminalHandle)
+  if (!paneKey) {
+    return null
+  }
+  return runtime.getOrchestrationDb().getCurrentRunForPane(paneKey)?.id ?? null
+}
+
+// Why: some handlers reach a Run through the thing they were asked about — a task, a message —
+// rather than through the caller. Echoing that Run would hand its lane roster to anyone able to
+// name an id inside it, so those sites gate on the caller owning the same Run.
+export function runIdIfCallerOwns(
+  runtime: OrcaRuntimeService,
+  callerTerminalHandle: string | undefined,
+  targetRunId: string | null | undefined
+): string | null {
+  if (!targetRunId) {
+    return null
+  }
+  return resolveCallerRunId(runtime, callerTerminalHandle) === targetRunId ? targetRunId : null
+}

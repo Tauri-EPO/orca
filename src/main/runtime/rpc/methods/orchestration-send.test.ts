@@ -934,10 +934,27 @@ describe('orchestration RPC methods', () => {
 
       const result = (await call('orchestration.reply', {
         id: original.id,
-        body: 'ack'
+        body: 'ack',
+        from: 'term_coord'
       })) as { fleet?: { runId: string } }
 
       expect(result.fleet?.runId).toBe(activeRunId)
+    })
+
+    it('orchestration.reply omits the fleet block for a caller outside the message Run', async () => {
+      setup()
+      vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
+      const original = db.insertMessage({ from: 'term_worker', to: 'term_coord', subject: 'status' })
+
+      // Why: replying only needs a message id, so without this gate any caller holding one from
+      // another Run would receive that Run's lane roster.
+      const result = (await call('orchestration.reply', {
+        id: original.id,
+        body: 'ack',
+        from: 'term_worker'
+      })) as { fleet?: unknown }
+
+      expect(result.fleet).toBeUndefined()
     })
 
     it('orchestration.reply carries the fleet block when answering a question', async () => {

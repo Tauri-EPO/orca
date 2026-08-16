@@ -769,7 +769,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
     printFleetEcho(result.result.fleet, json)
   },
 
-  'orchestration inbox': async ({ flags, client, json }) => {
+  'orchestration inbox': async ({ flags, cwd, client, json }) => {
     const full = flags.has('full')
     const result = await client.call<{
       messages: MessageSummary[]
@@ -778,6 +778,9 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
     }>('orchestration.inbox', {
       limit: getOptionalPositiveIntegerFlag(flags, 'limit'),
       terminal: getOptionalStringFlag(flags, 'terminal'),
+      // Why: --terminal names whose mailbox to list, not who is asking. Without the caller's own
+      // handle the runtime cannot resolve its Run, so the fleet block never attaches to an inbox.
+      callerTerminalHandle: await resolveCoordinatorTerminalHandle(flags, cwd, client),
       ...(flags.has('no-fleet') ? { fleet: false } : {})
     })
     printResult(result, json, (r) => {

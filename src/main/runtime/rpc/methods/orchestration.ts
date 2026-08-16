@@ -24,7 +24,11 @@ import {
 import { clampOrchestrationAskTimeoutMs } from '../../../../shared/orchestration-ask-timeout'
 import { ORCHESTRATION_GATE_METHODS } from './orchestration-gates'
 import type { FleetEcho } from '../../../../shared/orchestration-fleet-echo'
-import { attachFleetEcho } from './orchestration-fleet-echo-sources'
+import {
+  attachFleetEcho,
+  resolveCallerRunId,
+  runIdIfCallerOwns
+} from './orchestration-fleet-echo-sources'
 import {
   resolveBareOrchestrationRecipient,
   type SendRecipientWarning
@@ -1503,7 +1507,15 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       })
 
       runtime.notifyMessageArrived(reply.to_handle, reply.type)
-      return attachFleetEcho(runtime, original.run_id, fleetEnabled, { message: reply })
+      // Why: this branch never resolves a Run scope — it replies to whatever message id it was
+      // handed. Echoing that message's Run would let any caller holding an id from another Run
+      // read its lane roster, so gate on the caller owning the Run first.
+      return attachFleetEcho(
+        runtime,
+        runIdIfCallerOwns(runtime, params.from, original.run_id),
+        fleetEnabled,
+        { message: reply }
+      )
     }
   }),
 
@@ -1517,10 +1529,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         ? db.getAllMessagesForHandle(params.terminal, params.limit)
         : db.getInbox(params.limit)
       // Why: inbox has no --run; infer the caller's bound Run from its pane, same as check's boundRun lookup.
-      const paneKey = params.callerTerminalHandle
-        ? runtime.getTerminalPaneKey(params.callerTerminalHandle)
-        : undefined
-      const runId = paneKey ? (db.getCurrentRunForPane(paneKey)?.id ?? null) : null
+      const runId = resolveCallerRunId(runtime, params.callerTerminalHandle)
       return attachFleetEcho(runtime, runId, params.fleet !== false, {
         messages,
         count: messages.length
@@ -1790,13 +1799,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       // caller — attaching it unconditionally would leak another Run's lane roster to any
       // caller naming a --task outside their own Run. Only echo the fleet block when the
       // caller's own bound Run matches the task's Run.
-      const callerPaneKey = params.callerTerminalHandle
-        ? runtime.getTerminalPaneKey(params.callerTerminalHandle)
-        : undefined
-      const callerRunId = callerPaneKey
-        ? (db.getCurrentRunForPane(callerPaneKey)?.id ?? null)
-        : null
-      const runId = taskRunId && callerRunId === taskRunId ? taskRunId : null
+      const runId = runIdIfCallerOwns(runtime, params.callerTerminalHandle, taskRunId)
 
       // Why: the preamble is derived from the current task spec, so it can be regenerated deterministically even after dispatch completes.
       if (params.preamble) {
