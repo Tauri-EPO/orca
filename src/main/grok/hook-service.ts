@@ -9,11 +9,15 @@ import {
   readHooksJson,
   removeManagedCommands,
   wrapPosixHookCommand,
-  wrapWindowsHookCommand,
   writeHooksJson,
   writeManagedScript,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
+import { refreshManagedHookCommandIfPresent } from '../agent-hooks/managed-hook-config-refresh'
+import {
+  getWindowsAgentHookCommand,
+  getWindowsAgentHookCommandAsync
+} from '../agent-hooks/windows-agent-hook-launcher'
 import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
 import {
   readHooksJsonRemote,
@@ -103,7 +107,7 @@ function getManagedScriptPath(): string {
 
 function getManagedCommand(scriptPath: string): string {
   return process.platform === 'win32'
-    ? wrapWindowsHookCommand(scriptPath)
+    ? getWindowsAgentHookCommand(scriptPath)
     : wrapPosixHookCommand(scriptPath)
 }
 
@@ -184,7 +188,17 @@ function buildInstalledConfig(
 
 export class GrokHookService {
   async refreshManagedScripts(): Promise<void> {
-    await refreshManagedScriptIfPresent(getManagedScriptPath(), getManagedScript())
+    const scriptPresent = await refreshManagedScriptIfPresent(
+      getManagedScriptPath(),
+      getManagedScript()
+    )
+    if (process.platform === 'win32' && scriptPresent) {
+      await refreshManagedHookCommandIfPresent({
+        configPath: getConfigPath(),
+        scriptFileName: getManagedScriptFileName(),
+        resolveCommand: () => getWindowsAgentHookCommandAsync(getManagedScriptPath())
+      })
+    }
   }
 
   getStatus(): AgentHookInstallStatus {

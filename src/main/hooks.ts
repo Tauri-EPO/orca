@@ -753,7 +753,8 @@ export function runHook(
             // across the wsl.exe boundary. Wrap hookEnv (not a fresh env) so
             // the setup-var WSLENV entries registered above (#9206) are kept —
             // promptGuardShellEnv appends its own keys to the existing WSLENV.
-            env: promptGuardShellEnv(hookEnv)
+            env: promptGuardShellEnv(hookEnv),
+            windowsHide: true
           },
           (error, stdout, stderr) => {
             finish(error ?? null, stdout, stderr)
@@ -776,7 +777,8 @@ export function runHook(
         env: promptGuardShellEnv({
           ...process.env,
           ...getSetupEnvVars(repo, cwd)
-        })
+        }),
+        windowsHide: true
       },
       (error, stdout, stderr) => {
         if (error) {

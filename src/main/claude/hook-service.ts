@@ -9,12 +9,14 @@ import {
   writeManagedScript,
   type HooksConfig
 } from '../agent-hooks/installer-utils'
+import { refreshManagedHookCommandIfPresent } from '../agent-hooks/managed-hook-config-refresh'
 import {
   readHooksJsonRemote,
   writeHooksJsonRemote,
   writeManagedScriptRemote
 } from '../agent-hooks/installer-utils-remote'
 import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
+import { getWindowsAgentHookJsonCommandAsync } from '../agent-hooks/windows-agent-hook-launcher'
 import {
   buildPosixHookPayloadCapture,
   buildWindowsHookEnvironmentGuardLines,
@@ -29,7 +31,7 @@ import {
   CLAUDE_HOOK_SETTINGS,
   getManagedScriptFileName,
   getConfigPath,
-  getManagedCommand,
+  getLocalManagedCommand,
   getManagedLifecycleHook,
   getManagedScriptPath,
   getPosixManagedScriptFileName,
@@ -143,7 +145,7 @@ export class ClaudeHookService {
     }
 
     // Why: report partial registration instead of a false installed state.
-    const expectedHook = getManagedLifecycleHook(scriptPath, this.options.settings)
+    const expectedHook = getManagedLifecycleHook(scriptPath)
     const missing: string[] = []
     let presentCount = 0
     for (const event of CLAUDE_EVENTS) {
@@ -176,7 +178,7 @@ export class ClaudeHookService {
   }
 
   async refreshManagedScripts(): Promise<void> {
-    await refreshManagedScriptIfPresent(
+    const lifecycleScriptPresent = await refreshManagedScriptIfPresent(
       getManagedScriptPath(this.options.settings),
       getManagedScript('local', { skipWhenDevinImportsClaude: this.options.agent === 'claude' })
     )
@@ -185,6 +187,14 @@ export class ClaudeHookService {
       getStatusLineScriptPath(this.options.settings),
       getManagedStatusLineScript('local')
     )
+    if (process.platform === 'win32' && lifecycleScriptPresent) {
+      const scriptPath = getManagedScriptPath(this.options.settings)
+      await refreshManagedHookCommandIfPresent({
+        configPath: getConfigPath(this.options.settings),
+        scriptFileName: getManagedScriptFileName(this.options.settings),
+        resolveCommand: () => getWindowsAgentHookJsonCommandAsync(scriptPath)
+      })
+    }
   }
 
   install(): AgentHookInstallStatus {
@@ -201,7 +211,7 @@ export class ClaudeHookService {
       }
     }
 
-    const hook = getManagedLifecycleHook(scriptPath, this.options.settings)
+    const hook = getManagedLifecycleHook(scriptPath)
     let nextConfig = applyManagedHooks(
       config,
       hook,
@@ -232,7 +242,7 @@ export class ClaudeHookService {
     writeManagedScript(statusLineScriptPath, getManagedStatusLineScript('local'))
     const next = applyManagedStatusLine(
       config,
-      getManagedCommand(statusLineScriptPath),
+      getLocalManagedCommand(statusLineScriptPath),
       scriptFileName
     )
     try {

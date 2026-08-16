@@ -54,6 +54,22 @@ vi.mock('os', async (importOriginal) => {
   }
 })
 
+vi.mock('./windows-agent-hook-launcher', async () => {
+  const { join } = await import('node:path')
+  const launcherPath = () => join(homedirMock(), '.orca', 'agent-hooks', 'orca-agent-hook.exe')
+  return {
+    installWindowsAgentHookLauncher: launcherPath,
+    installWindowsAgentHookLauncherAsync: async () => launcherPath(),
+    getWindowsAgentHookCommand: (scriptPath: string) => `"${launcherPath()}" "${scriptPath}"`,
+    getWindowsAgentHookCommandAsync: async (scriptPath: string) =>
+      `"${launcherPath()}" "${scriptPath}"`,
+    getWindowsAgentHookJsonCommand: (scriptPath: string) =>
+      `"${launcherPath()}" --neutral-json "${scriptPath}"`,
+    getWindowsAgentHookJsonCommandAsync: async (scriptPath: string) =>
+      `"${launcherPath()}" --neutral-json "${scriptPath}"`
+  }
+})
+
 import { refreshManagedScriptIfPresent } from './managed-hook-script-refresh'
 import {
   MANAGED_AGENT_HOOK_INSTALLERS,
@@ -132,6 +148,49 @@ describe('managed hook script refresh', () => {
       expect(existsSync(join(home, '.claude'))).toBe(false)
       // Why: the statusline script was never installed here, so it must not appear.
       expect(existsSync(join(hooksDir, 'claude-statusline.cmd'))).toBe(false)
+    } finally {
+      homedirMock.mockImplementation(() => process.env.HOME ?? tmpdir())
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('migrates an existing Windows config even when CLI presence is unavailable', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-config-'))
+    homedirMock.mockReturnValue(home)
+    try {
+      const hooksDir = join(home, '.orca', 'agent-hooks')
+      const configDir = join(home, '.claude')
+      mkdirSync(hooksDir, { recursive: true })
+      mkdirSync(configDir, { recursive: true })
+      const scriptPath = join(hooksDir, 'claude-hook.cmd')
+      writeFileSync(scriptPath, STALE_WINDOWS_HOOK)
+      writeFileSync(
+        join(configDir, 'settings.json'),
+        `${JSON.stringify({
+          hooks: {
+            UserPromptSubmit: [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command: 'C:\\Windows\\System32\\conhost.exe',
+                    args: ['--headless', 'C:\\Windows\\System32\\cmd.exe', '/d', '/c', scriptPath]
+                  }
+                ]
+              }
+            ]
+          }
+        })}\n`
+      )
+
+      await withPlatform('win32', () => new ClaudeHookService().refreshManagedScripts())
+
+      const config = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8'))
+      const hook = config.hooks.UserPromptSubmit[0].hooks[0]
+      expect(hook.command).toBe(
+        `"${join(hooksDir, 'orca-agent-hook.exe')}" --neutral-json "${scriptPath}"`
+      )
+      expect(hook.args).toBeUndefined()
     } finally {
       homedirMock.mockImplementation(() => process.env.HOME ?? tmpdir())
       rmSync(home, { recursive: true, force: true })

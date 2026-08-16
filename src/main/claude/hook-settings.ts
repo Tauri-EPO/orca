@@ -1,34 +1,34 @@
 import { homedir } from 'node:os'
-import { basename, extname, join, win32 } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import {
   buildManagedCommandHook,
   createManagedCommandMatcher,
   getSharedManagedScriptPath,
   isPlainObject,
-  MANAGED_HOOK_TIMEOUT_SECONDS,
   removeManagedCommands,
   type HookCommandConfig,
   type HookDefinition,
   type HooksConfig
 } from '../agent-hooks/installer-utils'
 import { wrapRuntimeHomeHookCommand } from '../agent-hooks/runtime-home-hook-command'
+import {
+  getWindowsAgentHookCommand,
+  getWindowsAgentHookJsonCommand
+} from '../agent-hooks/windows-agent-hook-launcher'
 
 export type ClaudeCompatibleHookSettings = {
   configDirName: '.claude' | '.openclaude'
   scriptBaseName: 'claude-hook' | 'openclaude-hook'
-  supportsExecHookArgs: boolean
 }
 
 export const CLAUDE_HOOK_SETTINGS: ClaudeCompatibleHookSettings = {
   configDirName: '.claude',
-  scriptBaseName: 'claude-hook',
-  supportsExecHookArgs: true
+  scriptBaseName: 'claude-hook'
 }
 
 export const OPENCLAUDE_HOOK_SETTINGS: ClaudeCompatibleHookSettings = {
   configDirName: '.openclaude',
-  scriptBaseName: 'openclaude-hook',
-  supportsExecHookArgs: false
+  scriptBaseName: 'openclaude-hook'
 }
 
 export const CLAUDE_EVENTS = [
@@ -116,31 +116,21 @@ export function getManagedCommand(scriptPath: string): string {
   )
 }
 
-export function getManagedLifecycleHook(
-  scriptPath: string,
-  settings = CLAUDE_HOOK_SETTINGS
-): HookCommandConfig {
-  if (process.platform !== 'win32' || !settings.supportsExecHookArgs) {
+export function getManagedLifecycleHook(scriptPath: string): HookCommandConfig {
+  if (process.platform !== 'win32') {
     return buildManagedCommandHook(getManagedCommand(scriptPath))
   }
   return getWindowsManagedLifecycleHook(scriptPath)
 }
 
+export function getLocalManagedCommand(scriptPath: string): string {
+  return process.platform === 'win32'
+    ? getWindowsAgentHookCommand(scriptPath)
+    : getManagedCommand(scriptPath)
+}
+
 export function getWindowsManagedLifecycleHook(scriptPath: string): HookCommandConfig {
-  const system32 = win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')
-  const runtimeScriptPath = win32.join(
-    '%USERPROFILE%',
-    '.orca',
-    'agent-hooks',
-    win32.basename(scriptPath)
-  )
-  // Why: Claude's Windows shell form opens Git Bash consoles; exec form hosts the client in a windowless console.
-  return {
-    type: 'command',
-    command: win32.join(system32, 'conhost.exe'),
-    args: ['--headless', win32.join(system32, 'cmd.exe'), '/d', '/c', runtimeScriptPath],
-    timeout: MANAGED_HOOK_TIMEOUT_SECONDS
-  }
+  return buildManagedCommandHook(getWindowsAgentHookJsonCommand(scriptPath))
 }
 
 export function hasSameManagedHookInvocation(

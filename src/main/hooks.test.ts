@@ -954,7 +954,8 @@ describe('runHook', () => {
         'echo hello',
         expect.objectContaining({
           cwd: 'C:\\repo\\worktree',
-          shell: 'C:\\Windows\\System32\\cmd.exe'
+          shell: 'C:\\Windows\\System32\\cmd.exe',
+          windowsHide: true
         }),
         expect.any(Function)
       )
@@ -1029,6 +1030,7 @@ describe('runHook', () => {
       callback?.(null, '', '')
       expect(options).toEqual(
         expect.objectContaining({
+          windowsHide: true,
           env: expect.objectContaining({
             ORCA_ROOT_PATH: '/mnt/c/Users/jinwo/git/orca',
             ORCA_WORKTREE_PATH: '/home/jin/feature',

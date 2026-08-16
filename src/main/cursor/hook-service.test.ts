@@ -15,6 +15,15 @@ vi.mock('os', async () => {
   }
 })
 
+vi.mock('../agent-hooks/windows-agent-hook-launcher', async () => {
+  const { join } = await import('node:path')
+  const launcherPath = () => join(homedirMock(), '.orca', 'agent-hooks', 'orca-agent-hook.exe')
+  return {
+    installWindowsAgentHookLauncher: launcherPath,
+    getWindowsAgentHookCommand: (scriptPath: string) => `"${launcherPath()}" "${scriptPath}"`
+  }
+})
+
 import { CursorHookService } from './hook-service'
 import { POSIX_HOOK_STDIN_READER } from '../agent-hooks/hook-stdin-contract'
 
@@ -30,8 +39,7 @@ const CURSOR_EVENTS = [
 ]
 
 const CURSOR_SCRIPT_FILE_NAME = process.platform === 'win32' ? 'cursor-hook.cmd' : 'cursor-hook.sh'
-const WINDOWS_POWERSHELL_LAUNCHER =
-  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand \S+$/
+const WINDOWS_HEADLESS_LAUNCHER = /^"[^"]*\\orca-agent-hook\.exe" "[^"]*\\cursor-hook\.cmd"$/i
 
 describe('CursorHookService', () => {
   let homeDir: string
@@ -62,7 +70,7 @@ describe('CursorHookService', () => {
     for (const eventName of CURSOR_EVENTS) {
       const definition = config.hooks[eventName]?.[0]
       expect(definition?.command).toMatch(
-        process.platform === 'win32' ? WINDOWS_POWERSHELL_LAUNCHER : /cursor-hook/
+        process.platform === 'win32' ? WINDOWS_HEADLESS_LAUNCHER : /cursor-hook/
       )
       if (process.platform !== 'win32') {
         expect(definition?.command).toContain(join(homeDir, '.orca'))
@@ -106,7 +114,7 @@ describe('CursorHookService', () => {
 
         for (const eventName of ['beforeSubmitPrompt', 'stop']) {
           const command = config.hooks[eventName]?.[0]?.command
-          expect(command).toMatch(WINDOWS_POWERSHELL_LAUNCHER)
+          expect(command).toMatch(WINDOWS_HEADLESS_LAUNCHER)
         }
       } finally {
         rmSync(spaceHome, { recursive: true, force: true })
@@ -148,7 +156,7 @@ describe('CursorHookService', () => {
     expect(
       promptCommands.filter((command) =>
         process.platform === 'win32'
-          ? command !== undefined && WINDOWS_POWERSHELL_LAUNCHER.test(command)
+          ? command !== undefined && WINDOWS_HEADLESS_LAUNCHER.test(command)
           : command?.includes(CURSOR_SCRIPT_FILE_NAME)
       )
     ).toHaveLength(1)

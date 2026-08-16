@@ -14,6 +14,18 @@ vi.mock('electron', () => ({
   }
 }))
 
+vi.mock('../agent-hooks/windows-agent-hook-launcher', async () => {
+  const { homedir } = await import('node:os')
+  const { join } = await import('node:path')
+  const launcherPath = () => join(homedir(), '.orca', 'agent-hooks', 'orca-agent-hook.exe')
+  return {
+    installWindowsAgentHookLauncher: launcherPath,
+    getWindowsAgentHookCommand: (scriptPath: string) => `"${launcherPath()}" "${scriptPath}"`,
+    getWindowsAgentHookJsonCommand: (scriptPath: string) =>
+      `"${launcherPath()}" --neutral-json "${scriptPath}"`
+  }
+})
+
 import type { SFTPWrapper } from 'ssh2'
 import { createManagedCommandMatcher } from '../agent-hooks/installer-utils'
 import { ClaudeHookService } from './hook-service'
@@ -38,10 +50,9 @@ describe('getWindowsManagedLifecycleHook', () => {
     const scriptPath = 'C:\\Users\\%name%\\a^b&c\\.orca\\agent-hooks\\claude-hook.cmd'
     const hook = getWindowsManagedLifecycleHook(scriptPath)
 
-    expect(hook.args?.[0]).toBe('--headless')
-    expect(hook.args?.[1]).toMatch(/\\System32\\cmd\.exe$/i)
-    expect(hook.args?.at(-1)).toBe('%USERPROFILE%\\.orca\\agent-hooks\\claude-hook.cmd')
-    expect(hook.args).not.toContain(scriptPath)
+    expect(hook.command).toContain('orca-agent-hook.exe" --neutral-json')
+    expect(hook.command).toContain(`"${scriptPath}"`)
+    expect(hook.args).toBeUndefined()
   })
 })
 
@@ -219,11 +230,8 @@ describe('ClaudeHookService.install', () => {
         readFileSync(join(tmpHome, '.claude', 'settings.json'), 'utf-8')
       ) as { statusLine?: { type: string; command: string } }
       expect(settings.statusLine?.type).toBe('command')
-      expect(settings.statusLine?.command).toContain(
-        '"$HOME/.orca/agent-hooks/claude-statusline.cmd"'
-      )
-      expect(settings.statusLine?.command).toContain(
-        '"$HOME/.orca/agent-hooks/claude-statusline.sh"'
+      expect(settings.statusLine?.command).toMatch(
+        /^"[^"]*\\orca-agent-hook\.exe" "[^"]*\\claude-statusline\.cmd"$/i
       )
       expect(settings.statusLine?.command).not.toContain(tmpHome.replaceAll('\\', '/'))
 
@@ -339,7 +347,7 @@ describe('ClaudeHookService.install', () => {
   })
 
   it.skipIf(process.platform !== 'win32')(
-    'runs portable managed hooks through headless exec form',
+    'runs managed hooks through the native headless launcher',
     () => {
       const tmpHome = mkdtempSync(join(tmpdir(), 'orca claude home with spaces '))
       vi.stubEnv('HOME', tmpHome)
@@ -351,24 +359,16 @@ describe('ClaudeHookService.install', () => {
           readFileSync(join(tmpHome, '.claude', 'settings.json'), 'utf-8')
         ) as { hooks: Record<string, { hooks: TestHook[] }[]> }
 
-        const system32 = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')
         const scriptPath = join(tmpHome, '.orca', 'agent-hooks', CLAUDE_SCRIPT_FILE_NAME)
-        const runtimeScriptPath = join(
-          '%USERPROFILE%',
-          '.orca',
-          'agent-hooks',
-          CLAUDE_SCRIPT_FILE_NAME
-        )
+        const launcherPath = join(tmpHome, '.orca', 'agent-hooks', 'orca-agent-hook.exe')
 
         for (const eventName of ['UserPromptSubmit', 'Stop', 'StopFailure']) {
           const hook = settings.hooks[eventName]?.[0]?.hooks?.[0]
           expect(hook).toEqual({
             type: 'command',
-            command: join(system32, 'conhost.exe'),
-            args: ['--headless', join(system32, 'cmd.exe'), '/d', '/c', runtimeScriptPath],
+            command: `"${launcherPath}" --neutral-json "${scriptPath}"`,
             timeout: 10
           })
-          expect(hook.args).not.toContain(scriptPath)
         }
       } finally {
         vi.unstubAllEnvs()
@@ -522,9 +522,9 @@ describe('OpenClaudeHookService-compatible install', () => {
       for (const event of ['UserPromptSubmit', 'Stop', 'StopFailure']) {
         const command = parsed.hooks[event][0].hooks[0].command as string
         expect(isOpenClaudeManagedCommand(command)).toBe(true)
-        expect(command).toContain('"$HOME/.orca/agent-hooks/openclaude-hook.cmd"')
-        expect(command).toContain('"$HOME/.orca/agent-hooks/openclaude-hook.sh"')
-        expect(command).not.toContain(tmpHome.replaceAll('\\', '/'))
+        expect(command).toMatch(
+          /^"[^"]*\\orca-agent-hook\.exe" --neutral-json "[^"]*\\openclaude-hook\.cmd"$/i
+        )
       }
       expect(
         readFileSync(join(tmpHome, '.orca', 'agent-hooks', OPENCLAUDE_SCRIPT_FILE_NAME), 'utf-8')

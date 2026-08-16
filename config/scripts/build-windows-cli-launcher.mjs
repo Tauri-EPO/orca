@@ -15,27 +15,48 @@ if (process.platform !== 'win32') {
 const repoRoot = resolve(import.meta.dirname, '../..')
 const sourcePath = join(repoRoot, 'native', 'windows-cli-launcher', 'OrcaCliLauncher.cs')
 const outputPath = readArg('--output') ?? defaultOutputPath(repoRoot)
+const hookSourcePath = join(
+  repoRoot,
+  'native',
+  'windows-agent-hook-launcher',
+  'OrcaAgentHookLauncher.cs'
+)
+const hookOutputPath =
+  readArg('--hook-output') ??
+  join(repoRoot, 'native', 'windows-agent-hook-launcher', '.build', 'orca-agent-hook.exe')
 const compilerPath = findFrameworkCompiler(process.env)
 
 if (!compilerPath) {
   throw new Error('Unable to find the .NET Framework C# compiler required for orca.exe.')
 }
 
-mkdirSync(dirname(outputPath), { recursive: true })
-const result = spawnSync(
-  compilerPath,
-  ['/nologo', '/target:exe', '/optimize+', '/warnaserror+', `/out:${outputPath}`, sourcePath],
-  { cwd: repoRoot, stdio: 'inherit' }
-)
+compile(sourcePath, outputPath, 'exe')
+compile(hookSourcePath, hookOutputPath, 'winexe')
 
-if (result.signal) {
-  process.kill(process.pid, result.signal)
-}
-if (result.error) {
-  throw result.error
-}
-if (result.status !== 0) {
-  process.exit(result.status ?? 1)
+function compile(inputPath, destinationPath, target) {
+  mkdirSync(dirname(destinationPath), { recursive: true })
+  const result = spawnSync(
+    compilerPath,
+    [
+      '/nologo',
+      `/target:${target}`,
+      '/optimize+',
+      '/warnaserror+',
+      `/out:${destinationPath}`,
+      inputPath
+    ],
+    { cwd: repoRoot, stdio: 'inherit' }
+  )
+
+  if (result.signal) {
+    process.kill(process.pid, result.signal)
+  }
+  if (result.error) {
+    throw result.error
+  }
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1)
+  }
 }
 
 function defaultOutputPath(projectRoot) {

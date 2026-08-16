@@ -17,13 +17,21 @@ vi.mock('os', async () => {
   }
 })
 
+vi.mock('../agent-hooks/windows-agent-hook-launcher', async () => {
+  const { join } = await import('node:path')
+  const launcherPath = () => join(homedirMock(), '.orca', 'agent-hooks', 'orca-agent-hook.exe')
+  return {
+    installWindowsAgentHookLauncher: launcherPath,
+    getWindowsAgentHookCommand: (scriptPath: string) => `"${launcherPath()}" "${scriptPath}"`
+  }
+})
+
 import { getGrokToolEventMatcherForTests, GrokHookService } from './hook-service'
 import { buildWindowsGrokHookScript } from './windows-grok-hook-script'
 import { POSIX_HOOK_STDIN_READER } from '../agent-hooks/hook-stdin-contract'
 
 const GROK_SCRIPT_FILE_NAME = process.platform === 'win32' ? 'grok-hook.cmd' : 'grok-hook.sh'
-const WINDOWS_POWERSHELL_LAUNCHER =
-  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand \S+$/
+const WINDOWS_HEADLESS_LAUNCHER = /^"[^"]*\\orca-agent-hook\.exe" "[^"]*\\grok-hook\.cmd"$/i
 
 type WindowsGrokHookRun = {
   status: number | null
@@ -254,7 +262,7 @@ describe('GrokHookService', () => {
     const bareStar = ['*', ''].join('')
     expect(() => new RegExp(bareStar)).toThrow()
     expect(config.hooks.PreToolUse[0].hooks[0].command).toMatch(
-      process.platform === 'win32' ? WINDOWS_POWERSHELL_LAUNCHER : /grok-hook/
+      process.platform === 'win32' ? WINDOWS_HEADLESS_LAUNCHER : /grok-hook/
     )
     if (process.platform !== 'win32') {
       expect(config.hooks.PreToolUse[0].hooks[0].command).toContain(join(homeDir, '.orca'))
@@ -302,7 +310,7 @@ describe('GrokHookService', () => {
 
         for (const eventName of ['SessionStart', 'UserPromptSubmit', 'Stop']) {
           const command = config.hooks[eventName]?.[0]?.hooks?.[0]?.command
-          expect(command).toMatch(WINDOWS_POWERSHELL_LAUNCHER)
+          expect(command).toMatch(WINDOWS_HEADLESS_LAUNCHER)
         }
       } finally {
         rmSync(spaceHome, { recursive: true, force: true })
@@ -363,7 +371,7 @@ describe('GrokHookService', () => {
     expect(
       commands.some((command) =>
         process.platform === 'win32'
-          ? WINDOWS_POWERSHELL_LAUNCHER.test(command)
+          ? WINDOWS_HEADLESS_LAUNCHER.test(command)
           : command.includes(GROK_SCRIPT_FILE_NAME)
       )
     ).toBe(true)
