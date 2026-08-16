@@ -65,7 +65,8 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'outcome',
       'files-modified',
       'report-path',
-      'phase'
+      'phase',
+      'no-fleet'
     ],
     notes: [
       'On Windows PowerShell, quote group addresses such as --to "@all" or --to "@worktree:<id>".',
@@ -117,13 +118,13 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     summary: 'Reply to a message',
     usage:
       'orca orchestration reply --id <msg_id> --body <text> [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'id', 'body', 'run', 'from', 'retry-request']
+    allowedFlags: [...GLOBAL_FLAGS, 'id', 'body', 'run', 'from', 'retry-request', 'no-fleet']
   },
   {
     path: ['orchestration', 'inbox'],
     summary: 'Show messages across (or for) recipients',
     usage: 'orca orchestration inbox [--limit <n>] [--terminal <handle>] [--full] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'limit', 'terminal', 'full']
+    allowedFlags: [...GLOBAL_FLAGS, 'limit', 'terminal', 'full', 'no-fleet']
   },
   {
     path: ['orchestration', 'task-create'],
@@ -139,7 +140,8 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'parent',
       'run',
       'from',
-      'retry-request'
+      'retry-request',
+      'no-fleet'
     ]
   },
   {
@@ -147,7 +149,7 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     summary: 'List orchestration tasks',
     usage:
       'orca orchestration task-list [--status <status>] [--ready] [--brief] [--run <run_id>] [--from <handle>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'status', 'ready', 'brief', 'run', 'from'],
+    allowedFlags: [...GLOBAL_FLAGS, 'status', 'ready', 'brief', 'run', 'from', 'no-fleet'],
     notes: ['--brief collapses whitespace and caps each spec at 160 characters.']
   },
   {
@@ -155,7 +157,16 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     summary: 'Update a task status',
     usage:
       'orca orchestration task-update --id <task_id> --status <status> [--result <json>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'id', 'status', 'result', 'run', 'from', 'retry-request'],
+    allowedFlags: [
+      ...GLOBAL_FLAGS,
+      'id',
+      'status',
+      'result',
+      'run',
+      'from',
+      'retry-request',
+      'no-fleet'
+    ],
     notes: ['Valid --status values: pending, ready, dispatched, completed, failed, blocked.']
   },
   ...ORCHESTRATION_WORKER_COMMAND_SPECS,
@@ -173,7 +184,8 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'inject',
       'dry-run',
       'return-preamble',
-      'retry-request'
+      'retry-request',
+      'no-fleet'
     ]
   },
   {
@@ -181,7 +193,7 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     summary: 'Show dispatch context for a task',
     usage:
       'orca orchestration dispatch-show --task <task_id> [--preamble] [--from <handle>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'task', 'preamble', 'from']
+    allowedFlags: [...GLOBAL_FLAGS, 'task', 'preamble', 'from', 'no-fleet']
   },
   {
     path: ['orchestration', 'ask'],

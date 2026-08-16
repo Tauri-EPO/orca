@@ -23,6 +23,7 @@ import {
 } from '../../../../shared/orchestration-rpc-contract'
 import { clampOrchestrationAskTimeoutMs } from '../../../../shared/orchestration-ask-timeout'
 import { ORCHESTRATION_GATE_METHODS } from './orchestration-gates'
+import type { FleetEcho } from '../../../../shared/orchestration-fleet-echo'
 import { attachFleetEcho } from './orchestration-fleet-echo-sources'
 import {
   resolveBareOrchestrationRecipient,
@@ -147,7 +148,8 @@ const SendParams = z
     senderPaneKey: OptionalString,
     run: OptionalString,
     waitForLifecycleSettlement: OptionalBoolean,
-    devMode: OptionalBoolean
+    devMode: OptionalBoolean,
+    fleet: OptionalBoolean
   })
   .superRefine((params, ctx) => {
     if (!isDispatchMutationMessageType(params.type) || !params.to || !isGroupAddress(params.to)) {
@@ -201,13 +203,17 @@ const ReplyParams = z.object({
   id: requiredString('Missing --id'),
   body: requiredString('Missing --body'),
   from: OptionalString,
-  run: OptionalString
+  run: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const InboxParams = z.object({
   limit: OptionalFiniteNumber,
   // Why: filters the inbox to a handle so inbox and check --all give agreeing results (design doc §3.3).
-  terminal: OptionalString
+  terminal: OptionalString,
+  // Why: inbox has no --run; the fleet block infers the caller's bound Run from its pane, same as check.
+  callerTerminalHandle: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const TaskCreateParams = z.object({
@@ -217,7 +223,8 @@ const TaskCreateParams = z.object({
   deps: OptionalString,
   parent: OptionalString,
   callerTerminalHandle: OptionalString,
-  run: OptionalString
+  run: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const TaskListParams = z.object({
@@ -226,7 +233,8 @@ const TaskListParams = z.object({
   // Why: server-side truncation keeps --brief cheap over SSH/relay instead of shipping full specs the CLI throws away.
   brief: OptionalBoolean,
   run: OptionalString,
-  callerTerminalHandle: OptionalString
+  callerTerminalHandle: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const TaskUpdateParams = z.object({
@@ -246,7 +254,8 @@ const TaskUpdateParams = z.object({
     ),
   result: OptionalString,
   run: OptionalString,
-  callerTerminalHandle: OptionalString
+  callerTerminalHandle: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const DispatchParams = z.object({
@@ -258,14 +267,17 @@ const DispatchParams = z.object({
   dryRun: OptionalBoolean,
   returnPreamble: OptionalBoolean,
   devMode: OptionalBoolean,
-  run: OptionalString
+  run: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const DispatchShowParams = z.object({
   task: OptionalString,
   preamble: OptionalBoolean,
   from: OptionalString,
-  devMode: OptionalBoolean
+  devMode: OptionalBoolean,
+  callerTerminalHandle: OptionalString,
+  fleet: OptionalBoolean
 })
 
 const AskParams = z
@@ -456,6 +468,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       }
     ) => {
       const db = runtime.getOrchestrationDb()
+      const fleetEnabled = params.fleet !== false
       const from = params.from ?? 'unknown'
       const attestedCaller =
         orchestrationCompatibilityCallerAuthority?.terminalHandle === from
@@ -550,7 +563,8 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             'worker_done was queued, but the Run-home runtime did not confirm settlement. Verify the Task and Dispatch before retrying.'
           )
         }
-        return {
+        // Why: the Run lives on the remote run-home host, not this local db — no local lane state to echo.
+        return attachFleetEcho(runtime, null, fleetEnabled, {
           relay: {
             messageId: relay.message_id,
             sequence: relay.sequence,
@@ -559,7 +573,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             accepted: true
           },
           ...(lifecycle ? { lifecycle } : {})
-        }
+        })
       }
       const routing = resolveMessageRun(runtime, {
         from,
@@ -568,6 +582,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         runId: params.run,
         payload: params.payload
       })
+      const runId = routing.run?.id ?? null
       if (
         params.type === 'worker_done' &&
         !isWorkerReportOutcome(parseRemoteWorkerPayload(params.payload).outcome)
@@ -623,6 +638,12 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       ): T & {
         warnings?: SendRecipientWarning[]
       } => (sendWarnings.length > 0 ? { ...receipt, warnings: sendWarnings } : receipt)
+      // Why: every send return site owes both passengers — the recipient warnings this call
+      // collected and the Run's fleet echo — so compose them once instead of at each return.
+      const sendReceipt = <T extends object>(
+        receipt: T
+      ): Promise<T & { warnings?: SendRecipientWarning[]; fleet?: FleetEcho }> =>
+        attachFleetEcho(runtime, runId, fleetEnabled, withSendWarnings(receipt))
 
       if (!isGroupAddress(to)) {
         const federatedDispatchId = to.startsWith('dispatch:')
@@ -671,7 +692,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             })
           })
           runtime.ensureOrchestrationFederationRelay(messageRunId)
-          return withSendWarnings({
+          return sendReceipt({
             relay: {
               messageId: relay.message_id,
               sequence: relay.sequence,
@@ -772,7 +793,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             const rejection =
               db.convertLifecycleMessageToRejection(msg.id, code, authority.reason) ?? msg
             runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
-            return withSendWarnings({
+            return sendReceipt({
               message: rejection,
               lifecycle: {
                 action: 'rejected',
@@ -787,20 +808,20 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           const reconciled = reconcileLifecycleMessage(db, msg)
           // Why: a suppressed message is already read, so skip the notify that would wake a check --wait waiter to an empty result.
           if (reconciled.action === 'suppressed') {
-            return withSendWarnings({ message: msg })
+            return sendReceipt({ message: msg })
           }
           if (reconciled.action === 'rejected') {
             const rejection = db.getMessageById(msg.id) ?? msg
             runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
-            return withSendWarnings({ message: rejection, lifecycle: reconciled })
+            return sendReceipt({ message: rejection, lifecycle: reconciled })
           }
           runtime.notifyMessageArrived(msg.to_handle, msg.type)
-          return withSendWarnings(
+          return sendReceipt(
             msg.type === 'worker_done' ? { message: msg, lifecycle: reconciled } : { message: msg }
           )
         }
         runtime.notifyMessageArrived(msg.to_handle, msg.type)
-        return withSendWarnings({ message: msg })
+        return sendReceipt({ message: msg })
       }
 
       // Why: fan out one message per recipient (independent read-tracking) but share a thread_id for correlation (Section 4.5).
@@ -893,7 +914,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       for (const message of messages) {
         runtime.notifyMessageArrived(message.to_handle, message.type)
       }
-      return receipt
+      return attachFleetEcho(runtime, runId, fleetEnabled, receipt)
     }
   }),
 
@@ -1404,6 +1425,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       { orchestrationCompatibilityEvidence, runtime, legacyCoordinatorRunId }
     ) => {
       const db = runtime.getOrchestrationDb()
+      const fleetEnabled = params.fleet !== false
       const original = db.getMessageById(params.id)
       if (!original) {
         throw new Error(`Message not found: ${params.id}`)
@@ -1462,11 +1484,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         } else {
           runtime.notifyMessageArrived(`dispatch:${question.dispatch_id}`, 'status')
         }
-        return {
+        return attachFleetEcho(runtime, run.id, fleetEnabled, {
           message: answered.message,
           question: answered.question,
           duplicate: answered.duplicate
-        }
+        })
       }
 
       db.markAsRead([original.id])
@@ -1481,7 +1503,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       })
 
       runtime.notifyMessageArrived(reply.to_handle, reply.type)
-      return { message: reply }
+      return attachFleetEcho(runtime, original.run_id, fleetEnabled, { message: reply })
     }
   }),
 
@@ -1494,7 +1516,15 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       const messages = params.terminal
         ? db.getAllMessagesForHandle(params.terminal, params.limit)
         : db.getInbox(params.limit)
-      return { messages, count: messages.length }
+      // Why: inbox has no --run; infer the caller's bound Run from its pane, same as check's boundRun lookup.
+      const paneKey = params.callerTerminalHandle
+        ? runtime.getTerminalPaneKey(params.callerTerminalHandle)
+        : undefined
+      const runId = paneKey ? (db.getCurrentRunForPane(paneKey)?.id ?? null) : null
+      return attachFleetEcho(runtime, runId, params.fleet !== false, {
+        messages,
+        count: messages.length
+      })
     }
   }),
 
@@ -1541,7 +1571,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           : {}),
         runId: run.id
       })
-      return { task }
+      return attachFleetEcho(runtime, run.id, params.fleet !== false, { task })
     }
   }),
 
@@ -1574,12 +1604,12 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         }
         return base
       })
-      return {
+      return attachFleetEcho(runtime, run.id, params.fleet !== false, {
         runId: run.id,
         legacyReadOnly: run.legacy === 1,
         tasks: params.brief ? abbreviateOrchestrationTasks(tasks) : tasks,
         count: tasks.length
-      }
+      })
     }
   }),
 
@@ -1606,7 +1636,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       if (!task) {
         throw new Error(`Task not found: ${params.id}`)
       }
-      return { task }
+      return attachFleetEcho(runtime, run.id, params.fleet !== false, { task })
     }
   }),
 
@@ -1654,7 +1684,12 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             ? { cliCommand: runtime.getTerminalOrchestrationCliCommand(params.to) }
             : {})
         })
-        return { dispatch: null, injected: false, dryRun: true, preamble }
+        return attachFleetEcho(runtime, run.id, params.fleet !== false, {
+          dispatch: null,
+          injected: false,
+          dryRun: true,
+          preamble
+        })
       }
 
       if (!params.to) {
@@ -1732,10 +1767,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       }
 
       // Why: returnPreamble is opt-in because the preamble is several hundred bytes most callers don't need in the response.
+      const fleetEnabled = params.fleet !== false
       if (params.returnPreamble) {
-        return { dispatch: ctx, injected, preamble }
+        return attachFleetEcho(runtime, run.id, fleetEnabled, { dispatch: ctx, injected, preamble })
       }
-      return { dispatch: ctx, injected }
+      return attachFleetEcho(runtime, run.id, fleetEnabled, { dispatch: ctx, injected })
     }
   }),
 
@@ -1748,6 +1784,19 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         throw new Error('Missing --task')
       }
       const ctx = db.getDispatchContext(params.task)
+      const fleetEnabled = params.fleet !== false
+      const taskRunId = ctx?.run_id ?? null
+      // Why: unlike every other handler, dispatchShow's Run comes from the *task*, not the
+      // caller — attaching it unconditionally would leak another Run's lane roster to any
+      // caller naming a --task outside their own Run. Only echo the fleet block when the
+      // caller's own bound Run matches the task's Run.
+      const callerPaneKey = params.callerTerminalHandle
+        ? runtime.getTerminalPaneKey(params.callerTerminalHandle)
+        : undefined
+      const callerRunId = callerPaneKey
+        ? (db.getCurrentRunForPane(callerPaneKey)?.id ?? null)
+        : null
+      const runId = taskRunId && callerRunId === taskRunId ? taskRunId : null
 
       // Why: the preamble is derived from the current task spec, so it can be regenerated deterministically even after dispatch completes.
       if (params.preamble) {
@@ -1766,10 +1815,10 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           devMode: params.devMode,
           ...(ctx ? { cliCommand: runtime.getTerminalOrchestrationCliCommand(workerHandle) } : {})
         })
-        return { dispatch: ctx ?? null, preamble }
+        return attachFleetEcho(runtime, runId, fleetEnabled, { dispatch: ctx ?? null, preamble })
       }
 
-      return { dispatch: ctx ?? null }
+      return attachFleetEcho(runtime, runId, fleetEnabled, { dispatch: ctx ?? null })
     }
   }),
 

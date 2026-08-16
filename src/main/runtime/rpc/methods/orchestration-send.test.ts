@@ -898,4 +898,67 @@ describe('orchestration RPC methods', () => {
       expect(db.getActiveDispatchForTerminal('term_worker')).toBeDefined()
     })
   })
+
+  describe('fleet echo', () => {
+    it('orchestration.send carries the fleet block for a point-to-point send', async () => {
+      setup()
+      vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
+      const task = db.createTask({ spec: 'fleet echo work' })
+      db.createDispatchContext(task.id, 'term_worker')
+
+      const result = (await call('orchestration.send', {
+        from: 'term_coord',
+        to: `run:${activeRunId}`,
+        subject: 'hello'
+      })) as { fleet?: { runId: string } }
+
+      expect(result.fleet?.runId).toBe(activeRunId)
+    })
+
+    it('orchestration.send omits the block when fleet is false', async () => {
+      setup()
+      const result = (await call('orchestration.send', {
+        from: 'term_coord',
+        to: `run:${activeRunId}`,
+        subject: 'hello',
+        fleet: false
+      })) as { fleet?: unknown }
+
+      expect(result.fleet).toBeUndefined()
+    })
+
+    it('orchestration.reply carries the fleet block for a direct reply', async () => {
+      setup()
+      vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
+      const original = db.insertMessage({ from: 'term_worker', to: 'term_coord', subject: 'status' })
+
+      const result = (await call('orchestration.reply', {
+        id: original.id,
+        body: 'ack'
+      })) as { fleet?: { runId: string } }
+
+      expect(result.fleet?.runId).toBe(activeRunId)
+    })
+
+    it('orchestration.reply carries the fleet block when answering a question', async () => {
+      setup()
+      vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
+      const task = db.createTask({ spec: 'reply fleet work' })
+      const dispatch = db.createDispatchContext(task.id, 'term_worker')
+      const created = db.createQuestion({
+        runId: activeRunId as string,
+        dispatchId: dispatch.id,
+        askerHandle: 'term_worker',
+        question: 'Proceed?'
+      })
+
+      const result = (await call('orchestration.reply', {
+        id: created.message.id,
+        body: 'yes',
+        from: 'term_coord'
+      })) as { fleet?: { runId: string } }
+
+      expect(result.fleet?.runId).toBe(activeRunId)
+    })
+  })
 })

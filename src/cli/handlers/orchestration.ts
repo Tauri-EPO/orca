@@ -108,7 +108,7 @@ type SendRecipientWarning = {
   message: string
 }
 
-type OrchestrationSendResult =
+type OrchestrationSendResult = (
   | {
       message: { id: string; run_id?: string }
       lifecycle?: LifecycleSendResult
@@ -130,6 +130,7 @@ type OrchestrationSendResult =
       lifecycle?: LifecycleSendResult
       warnings?: SendRecipientWarning[]
     }
+) & { fleet?: FleetEcho }
 
 function resolveCompatibilityCliCommand(): 'orca' | 'orca-ide' | 'orca-dev' {
   const configured = process.env.ORCA_CLI_COMMAND
@@ -611,7 +612,8 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       // Why: pane key is the remint-stable sender identity the runtime verifies lifecycle ownership against; older runtimes strip it.
       senderPaneKey: process.env.ORCA_PANE_KEY || undefined,
       waitForLifecycleSettlement: type === 'worker_done' ? true : undefined,
-      devMode: isDevCliInvocation()
+      devMode: isDevCliInvocation(),
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
     }
     const dispatchCapability = getOptionalStringFlag(flags, 'dispatch-capability')
     const result = await callMutation<OrchestrationSendResult>(
@@ -646,6 +648,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       }
       return withWarnings(`Sent ${r.messages.length} messages to ${r.recipients} recipients`)
     })
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration check': async ({ flags, client, cwd, json }) => {
@@ -750,7 +753,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
 
   'orchestration reply': async ({ flags, client, cwd, json }) => {
     const from = await resolveOrchestrationTerminalHandle(flags, cwd, client, 'from')
-    const result = await callMutation<{ message: { id: string } }>(
+    const result = await callMutation<{ message: { id: string }; fleet?: FleetEcho }>(
       client,
       flags,
       'orchestration.reply',
@@ -758,10 +761,12 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         id: getRequiredStringFlag(flags, 'id'),
         body: getRequiredStringFlag(flags, 'body'),
         run: getOptionalStringFlag(flags, 'run'),
-        from
+        from,
+        ...(flags.has('no-fleet') ? { fleet: false } : {})
       }
     )
     printResult(result, json, (r) => `Replied ${r.message.id}`)
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration inbox': async ({ flags, client, json }) => {
@@ -769,9 +774,11 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
     const result = await client.call<{
       messages: MessageSummary[]
       count: number
+      fleet?: FleetEcho
     }>('orchestration.inbox', {
       limit: getOptionalPositiveIntegerFlag(flags, 'limit'),
-      terminal: getOptionalStringFlag(flags, 'terminal')
+      terminal: getOptionalStringFlag(flags, 'terminal'),
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
     })
     printResult(result, json, (r) => {
       if (r.count === 0) {
@@ -795,25 +802,26 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         })
         .join(full ? '\n\n' : '\n')
     })
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration task-create': async ({ flags, client, cwd, json }) => {
     const callerTerminalHandle = await resolveCoordinatorTerminalHandle(flags, cwd, client)
-    const result = await callMutation<{ task: { id: string; status: string } }>(
-      client,
-      flags,
-      'orchestration.taskCreate',
-      {
-        spec: getRequiredStringFlag(flags, 'spec'),
-        taskTitle: getOptionalStringFlag(flags, 'task-title'),
-        displayName: getOptionalStringFlag(flags, 'display-name'),
-        deps: getOptionalStringFlag(flags, 'deps'),
-        parent: getOptionalStringFlag(flags, 'parent'),
-        run: getOptionalStringFlag(flags, 'run'),
-        callerTerminalHandle
-      }
-    )
+    const result = await callMutation<{
+      task: { id: string; status: string }
+      fleet?: FleetEcho
+    }>(client, flags, 'orchestration.taskCreate', {
+      spec: getRequiredStringFlag(flags, 'spec'),
+      taskTitle: getOptionalStringFlag(flags, 'task-title'),
+      displayName: getOptionalStringFlag(flags, 'display-name'),
+      deps: getOptionalStringFlag(flags, 'deps'),
+      parent: getOptionalStringFlag(flags, 'parent'),
+      run: getOptionalStringFlag(flags, 'run'),
+      callerTerminalHandle,
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
+    })
     printResult(result, json, (r) => `Created ${r.task.id} [${r.task.status}]`)
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration task-list': async ({ flags, client, cwd, json }) => {
@@ -836,12 +844,14 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       count: number
       runId?: string
       legacyReadOnly?: boolean
+      fleet?: FleetEcho
     }>('orchestration.taskList', {
       status: getOptionalStringFlag(flags, 'status'),
       ready: flags.has('ready') ? true : undefined,
       brief: brief ? true : undefined,
       run,
-      callerTerminalHandle
+      callerTerminalHandle,
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
     })
     // Why: only older runtimes (no spec_truncated) skip server-side abbreviation and need this client-side fallback.
     const needsClientAbbreviation =
@@ -868,6 +878,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         .join('\n')
       return r.legacyReadOnly ? `Legacy Run ${r.runId} (read-only)\n${tasks}` : tasks
     })
+    printFleetEcho(output.result.fleet, json)
   },
 
   'orchestration task-update': async ({ flags, client, cwd, json }) => {
@@ -878,19 +889,19 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         `invalid status '${status}', expected one of: ${TASK_STATUS_VALUES.join(', ')}`
       )
     }
-    const result = await callMutation<{ task: { id: string; status: string } }>(
-      client,
-      flags,
-      'orchestration.taskUpdate',
-      {
-        id: getRequiredStringFlag(flags, 'id'),
-        status,
-        result: getOptionalStringFlag(flags, 'result'),
-        run: getOptionalStringFlag(flags, 'run'),
-        callerTerminalHandle: await resolveCoordinatorTerminalHandle(flags, cwd, client)
-      }
-    )
+    const result = await callMutation<{
+      task: { id: string; status: string }
+      fleet?: FleetEcho
+    }>(client, flags, 'orchestration.taskUpdate', {
+      id: getRequiredStringFlag(flags, 'id'),
+      status,
+      result: getOptionalStringFlag(flags, 'result'),
+      run: getOptionalStringFlag(flags, 'run'),
+      callerTerminalHandle: await resolveCoordinatorTerminalHandle(flags, cwd, client),
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
+    })
     printResult(result, json, (r) => `Updated ${r.task.id} -> ${r.task.status}`)
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration worker-start': async ({ flags, client, cwd, json }) => {
@@ -1111,6 +1122,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       injected?: boolean
       dryRun?: boolean
       preamble?: string
+      fleet?: FleetEcho
     }>(client, flags, 'orchestration.dispatch', {
       task: getRequiredStringFlag(flags, 'task'),
       run: getOptionalStringFlag(flags, 'run'),
@@ -1119,7 +1131,8 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       inject: flags.has('inject') ? true : undefined,
       dryRun,
       returnPreamble,
-      devMode: isDevCliInvocation()
+      devMode: isDevCliInvocation(),
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
     })
     printResult(result, json, (r) => {
       if (r.dryRun) {
@@ -1128,6 +1141,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       const base = `Dispatched ${r.dispatch?.task_id} -> ${r.dispatch?.id} [${r.dispatch?.status}]`
       return r.preamble ? `${base}\n\n--- Preamble ---\n${r.preamble}` : base
     })
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration ask': async ({ flags, client, cwd, json }) => {
@@ -1230,11 +1244,13 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
     const result = await client.call<{
       dispatch: { id: string; task_id: string; status: string } | null
       preamble?: string
+      fleet?: FleetEcho
     }>('orchestration.dispatchShow', {
       task: getRequiredStringFlag(flags, 'task'),
       preamble: showPreamble,
       from,
-      devMode: isDevCliInvocation()
+      devMode: isDevCliInvocation(),
+      ...(flags.has('no-fleet') ? { fleet: false } : {})
     })
     printResult(result, json, (r) => {
       if (r.preamble && showPreamble) {
@@ -1245,6 +1261,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       }
       return `${r.dispatch.id} task=${r.dispatch.task_id} [${r.dispatch.status}]`
     })
+    printFleetEcho(result.result.fleet, json)
   },
 
   'orchestration coordinator-start': async () => {

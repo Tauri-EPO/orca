@@ -393,7 +393,7 @@ Wait for `tui-idle` before dispatching. Always pass `--timeout-ms`; real coding 
 
 ## Fleet Echo
 
-`check` returns an optional `fleet` block: a live snapshot of active dispatches (`pending`/`dispatched` only) on the current Run, up to 12 lanes, with `truncated: true` when more exist. Under `--json` the block is `result.fleet`; in text mode it prints as a trailing block. Suppress it with `--no-fleet`.
+`check`, `send`, `reply`, `inbox`, `task-create`, `task-list`, `task-update`, `dispatch`, and `dispatch-show` return an optional `fleet` block: a live snapshot of active dispatches (`pending`/`dispatched` only) on the current Run, up to 12 lanes, with `truncated: true` when more exist. `ask` never returns it (it blocks until answered, so a snapshot at return time would already be stale) and neither does `reset` (it tears the Run down). Under `--json` the block is `result.fleet`; in text mode it prints as a trailing block. Suppress it with `--no-fleet`.
 
 Each lane:
 
