@@ -71,6 +71,7 @@ vi.mock('./windows-agent-hook-launcher', async () => {
 })
 
 import { refreshManagedScriptIfPresent } from './managed-hook-script-refresh'
+import { refreshManagedHookCommandIfPresent } from './managed-hook-config-refresh'
 import {
   MANAGED_AGENT_HOOK_INSTALLERS,
   MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS
@@ -193,6 +194,35 @@ describe('managed hook script refresh', () => {
       expect(hook.args).toBeUndefined()
     } finally {
       homedirMock.mockImplementation(() => process.env.HOME ?? tmpdir())
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('treats a concurrently deleted config as an aborted refresh', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-deleted-config-'))
+    const configPath = join(home, 'settings.json')
+    const scriptPath = join(home, '.orca', 'agent-hooks', 'claude-hook.cmd')
+    writeFileSync(
+      configPath,
+      `${JSON.stringify({
+        hooks: {
+          Stop: [{ hooks: [{ type: 'command', command: scriptPath }] }]
+        }
+      })}\n`
+    )
+    try {
+      await expect(
+        refreshManagedHookCommandIfPresent({
+          configPath,
+          scriptFileName: 'claude-hook.cmd',
+          resolveCommand: async () => {
+            rmSync(configPath)
+            return 'replacement'
+          }
+        })
+      ).resolves.toBe(false)
+      expect(existsSync(configPath)).toBe(false)
+    } finally {
       rmSync(home, { recursive: true, force: true })
     }
   })

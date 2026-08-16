@@ -20,8 +20,13 @@ vi.mock('../agent-hooks/windows-agent-hook-launcher', async () => {
   const launcherPath = () => join(homedir(), '.orca', 'agent-hooks', 'orca-agent-hook.exe')
   return {
     installWindowsAgentHookLauncher: launcherPath,
+    installWindowsAgentHookLauncherAsync: async () => launcherPath(),
     getWindowsAgentHookCommand: (scriptPath: string) => `"${launcherPath()}" "${scriptPath}"`,
+    getWindowsAgentHookCommandAsync: async (scriptPath: string) =>
+      `"${launcherPath()}" "${scriptPath}"`,
     getWindowsAgentHookJsonCommand: (scriptPath: string) =>
+      `"${launcherPath()}" --neutral-json "${scriptPath}"`,
+    getWindowsAgentHookJsonCommandAsync: async (scriptPath: string) =>
       `"${launcherPath()}" --neutral-json "${scriptPath}"`
   }
 })

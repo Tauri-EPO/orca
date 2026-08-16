@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import type * as osModule from 'node:os'
@@ -16,7 +16,8 @@ vi.mock('node:os', async () => {
 import {
   getWindowsAgentHookCommand,
   getWindowsAgentHookJsonCommand,
-  installWindowsAgentHookLauncher
+  installWindowsAgentHookLauncher,
+  installWindowsAgentHookLauncherAsync
 } from './windows-agent-hook-launcher'
 
 describe('Windows agent hook launcher', () => {
@@ -41,6 +42,19 @@ describe('Windows agent hook launcher', () => {
     expect(dirname(installedPath)).toBe(join(homeDir, '.orca', 'agent-hooks'))
     expect(basename(installedPath)).toMatch(/^orca-agent-hook-[a-f0-9]{16}\.exe$/)
     expect(readFileSync(installedPath)).toEqual(readFileSync(sourcePath))
+  })
+
+  it('reuses the content-addressed launcher across repeated installs', async () => {
+    const sourcePath = join(homeDir, 'source.exe')
+    writeFileSync(sourcePath, Buffer.from([0x4d, 0x5a, 0x03, 0x04]))
+
+    const firstPath = installWindowsAgentHookLauncher(sourcePath)
+    const secondPath = installWindowsAgentHookLauncher(sourcePath)
+    const asyncPath = await installWindowsAgentHookLauncherAsync(sourcePath)
+
+    expect(secondPath).toBe(firstPath)
+    expect(asyncPath).toBe(firstPath)
+    expect(readdirSync(dirname(firstPath))).toEqual([basename(firstPath)])
   })
 
   it('quotes launcher and script paths without adding a shell layer', () => {

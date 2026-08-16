@@ -44,14 +44,14 @@ internal static class OrcaAgentHookLauncher
                 inputTask.Wait(StandardInputTimeoutMilliseconds);
                 TryClose(child.StandardInput);
 
-                if (!child.WaitForExit(ChildExitTimeoutMilliseconds))
+                bool childTimedOut = !child.WaitForExit(ChildExitTimeoutMilliseconds);
+                if (childTimedOut)
                 {
-                    child.Kill();
-                    child.WaitForExit();
+                    KillProcessTree(child, systemDirectory);
                 }
                 Task.WaitAll(new Task[] { outputTask, errorTask }, ChildExitTimeoutMilliseconds);
                 WriteNeutralJson(emitNeutralJson);
-                return child.ExitCode;
+                return childTimedOut ? 0 : child.ExitCode;
             }
         }
         catch
@@ -60,6 +60,43 @@ internal static class OrcaAgentHookLauncher
             WriteNeutralJson(emitNeutralJson);
             return 0;
         }
+    }
+
+    private static void KillProcessTree(Process child, string systemDirectory)
+    {
+        try
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                FileName = Path.Combine(systemDirectory, "taskkill.exe"),
+                Arguments = "/PID " + child.Id + " /T /F",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using (Process treeKiller = Process.Start(startInfo))
+            {
+                treeKiller.BeginOutputReadLine();
+                treeKiller.BeginErrorReadLine();
+                if (!treeKiller.WaitForExit(ChildExitTimeoutMilliseconds))
+                {
+                    treeKiller.Kill();
+                }
+            }
+        }
+        catch { }
+
+        if (!child.HasExited)
+        {
+            try
+            {
+                child.Kill();
+            }
+            catch { }
+        }
+        child.WaitForExit(ChildExitTimeoutMilliseconds);
     }
 
     private static Task CopyStandardInputAsync(Stream destination)

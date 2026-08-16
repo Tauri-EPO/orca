@@ -113,7 +113,15 @@ async function writeConfigIfUnchanged(
   config: HooksConfig
 ): Promise<boolean> {
   const writePath = await resolveWritePath(configPath)
-  const currentRaw = await readFile(writePath, 'utf-8')
+  let currentRaw: string
+  try {
+    currentRaw = await readFile(writePath, 'utf-8')
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false
+    }
+    throw error
+  }
   if (currentRaw !== expectedRaw) {
     return false
   }

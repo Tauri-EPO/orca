@@ -11,8 +11,8 @@ function getVersionedLauncherFileName(source: Buffer): string {
   return `orca-agent-hook-${digest}.exe`
 }
 
-function resolveBundledLauncherPath(): string {
-  const candidates = [
+function getBundledLauncherCandidatePaths(): string[] {
+  return [
     ...(process.resourcesPath ? [join(process.resourcesPath, 'bin', LAUNCHER_FILE_NAME)] : []),
     ...(process.env.ORCA_DEV_REPO_ROOT
       ? [
@@ -27,6 +27,10 @@ function resolveBundledLauncherPath(): string {
       : []),
     join(process.cwd(), 'native', 'windows-agent-hook-launcher', '.build', LAUNCHER_FILE_NAME)
   ]
+}
+
+function resolveBundledLauncherPath(): string {
+  const candidates = getBundledLauncherCandidatePaths()
   const sourcePath = candidates.find((candidate) => existsSync(candidate))
   if (!sourcePath) {
     throw new Error('Missing bundled Windows agent hook launcher.')
@@ -35,21 +39,7 @@ function resolveBundledLauncherPath(): string {
 }
 
 async function resolveBundledLauncherPathAsync(): Promise<string> {
-  const candidates = [
-    ...(process.resourcesPath ? [join(process.resourcesPath, 'bin', LAUNCHER_FILE_NAME)] : []),
-    ...(process.env.ORCA_DEV_REPO_ROOT
-      ? [
-          join(
-            process.env.ORCA_DEV_REPO_ROOT,
-            'native',
-            'windows-agent-hook-launcher',
-            '.build',
-            LAUNCHER_FILE_NAME
-          )
-        ]
-      : []),
-    join(process.cwd(), 'native', 'windows-agent-hook-launcher', '.build', LAUNCHER_FILE_NAME)
-  ]
+  const candidates = getBundledLauncherCandidatePaths()
   for (const candidate of candidates) {
     try {
       await access(candidate)

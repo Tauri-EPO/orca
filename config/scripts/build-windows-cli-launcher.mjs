@@ -27,7 +27,9 @@ const hookOutputPath =
 const compilerPath = findFrameworkCompiler(process.env)
 
 if (!compilerPath) {
-  throw new Error('Unable to find the .NET Framework C# compiler required for orca.exe.')
+  throw new Error(
+    'Unable to find the .NET Framework C# compiler required for orca.exe and orca-agent-hook.exe.'
+  )
 }
 
 compile(sourcePath, outputPath, 'exe')
