@@ -401,7 +401,7 @@ Each lane:
 <handle>  <taskId>  <dispatchId>  <lifecycle>  <quietMs>  <delivery>[ (<processState>)]
 ```
 
-- `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but never started a turn. Re-dispatch that lane; waiting on it will never resolve. Text mode renders this as `NOT_ACCEPTED`, deliberately loud.
+- `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but nothing indicates it started a turn. Text mode renders this as `NOT_ACCEPTED`, deliberately loud. Treat it as "look now", not as "re-dispatch now": for a `worker-start` lane it is authoritative (the worker never reached `input_accepted`), but for a plain `dispatch --inject` there is no acceptance signal to read, so it is inferred from the terminal having produced no output since the dispatch. Confirm with `terminal read` before re-dispatching — a re-dispatch on a false positive duplicates work that is already running.
 - `processState` is `dead` or `unknown` — never `live` on this build. A connected PTY doesn't prove the agent inside it is alive, so the runtime won't claim liveness it hasn't verified. `unknown` is not an error.
 - Federated (remote) lanes report `unknown` for `processState` only — liveness facts are host-local, and only the runtime that owns the PTY has them. `delivery` still resolves normally: federated worker-start writes `stage='input_accepted'` to the local worker-dispatch row just like a local start, so these lanes report `accepted` once the remote worker is ready.
 - `check --wait` returns `fleet` on timeout too, so a timeout tells you why nobody spoke, not just that nobody did.

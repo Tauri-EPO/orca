@@ -156,6 +156,16 @@ describe('buildFleetEcho', () => {
     expect(echo.lanes[0].quietMs).toBe(0)
   })
 
+  it('clamps a caller-supplied limit to the hard cap', () => {
+    const many = Array.from({ length: FLEET_ECHO_MAX_LANES + 5 }, (_unused, index) =>
+      dispatch({ dispatchId: `ctx_${index}`, taskId: `task_${index}` })
+    )
+    const echo = buildFleetEcho('run_1', makeSources({ listActiveDispatches: () => many }), 500)
+
+    expect(echo.lanes).toHaveLength(FLEET_ECHO_MAX_LANES)
+    expect(echo.truncated).toBe(true)
+  })
+
   it('treats an epoch-zero output timestamp as a real time, not as absent', () => {
     const echo = buildFleetEcho(
       'run_1',

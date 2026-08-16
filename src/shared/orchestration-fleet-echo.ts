@@ -77,7 +77,10 @@ export function buildFleetEcho(
 ): FleetEcho {
   const dispatches = sources.listActiveDispatches()
   const now = sources.now()
-  const lanes = dispatches.slice(0, limit).map((entry): FleetLaneRow => {
+  // Why: the cap is the response contract, not a default — a caller passing a larger limit must
+  // not be able to widen a block that rides on every orchestration response.
+  const effectiveLimit = Math.max(0, Math.min(limit, FLEET_ECHO_MAX_LANES))
+  const lanes = dispatches.slice(0, effectiveLimit).map((entry): FleetLaneRow => {
     const signal = entry.assigneeHandle ? sources.getTerminalSignal(entry.assigneeHandle) : null
     const lastOutputAt = signal?.lastOutputAt ?? null
     return {
