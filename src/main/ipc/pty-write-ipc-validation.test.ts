@@ -437,4 +437,41 @@ describe('registerPtyHandlers', () => {
       })
     }
   )
+  it('exposes lastUserInputAt from pty:write and reports Orca window focus', async () => {
+    const mockProc = createMockProc()
+    spawnMock.mockReturnValue(mockProc.proc)
+    const captured: {
+      lastUserInputAt?: (ptyId: string) => number | undefined
+      isOrcaWindowFocused?: () => boolean
+    } = {}
+    const runtime = {
+      setPtyController: (next: {
+        lastUserInputAt?: (ptyId: string) => number | undefined
+        isOrcaWindowFocused?: () => boolean
+      }) => {
+        captured.lastUserInputAt = next.lastUserInputAt
+        captured.isOrcaWindowFocused = next.isOrcaWindowFocused
+      },
+      getDriver: vi.fn(() => ({ kind: 'host' })),
+      noteTerminalSpawnCommand: vi.fn(),
+      onPtySpawned: vi.fn(),
+      onPtyData: vi.fn(),
+      onPtyExit: vi.fn(),
+      createPreAllocatedTerminalHandle: vi.fn(() => null),
+      preAllocateHandleForPty: vi.fn()
+    }
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    const result = (await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24
+    })) as { id: string }
+
+    expect(captured.lastUserInputAt?.(result.id)).toBeUndefined()
+    getPtyWriteListener()(mainWindowIpcEvent, { id: result.id, data: 'h' })
+    expect(captured.lastUserInputAt?.(result.id)).toEqual(expect.any(Number))
+    expect(captured.isOrcaWindowFocused?.()).toBe(true)
+
+    vi.spyOn(mainWindow, 'isFocused').mockReturnValue(false)
+    expect(captured.isOrcaWindowFocused?.()).toBe(false)
+  })
 })

@@ -5,17 +5,20 @@ export class MailPointerRepointScheduler {
 
   constructor(private readonly repoint: (handle: string) => void) {}
 
-  schedule(handle: string): void {
+  schedule(handle: string, delayMs = MAIL_POINTER_REPOINT_DELAY_MS): void {
     if (this.timersByHandle.has(handle)) {
       return
     }
-    const timer = setTimeout(() => {
-      if (this.timersByHandle.get(handle) !== timer) {
-        return
-      }
-      this.timersByHandle.delete(handle)
-      this.repoint(handle)
-    }, MAIL_POINTER_REPOINT_DELAY_MS)
+    const timer = setTimeout(
+      () => {
+        if (this.timersByHandle.get(handle) !== timer) {
+          return
+        }
+        this.timersByHandle.delete(handle)
+        this.repoint(handle)
+      },
+      Math.max(0, delayMs)
+    )
     timer.unref?.()
     this.timersByHandle.set(handle, timer)
   }

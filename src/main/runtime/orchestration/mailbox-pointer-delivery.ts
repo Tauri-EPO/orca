@@ -1,10 +1,9 @@
 import { isCursorAgentTitle } from '../../../shared/agent-detection'
-import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, type OrchestrationDb } from './db'
+import type { OrchestrationDb } from './db'
 import { formatMessagePointer } from './formatter'
 import type { OrchestrationMailboxDeliveryTarget } from './mailbox-delivery-target'
 import {
-  hasUnfilteredOrchestrationWaiter,
-  messageTypeHasOrchestrationWaiter,
+  collectDeliverableMailboxPointerMessages,
   shouldReleaseOrchestrationPointer,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
@@ -14,6 +13,7 @@ import {
   type OrchestrationMailboxDeliveryFlight
 } from './mailbox-pointer-state'
 import { submitOrchestrationMailboxPointer } from './mailbox-pointer-submit'
+import { deferMailboxPointerForRecentTyping } from './mailbox-pointer-typing-guard'
 
 export type { OrchestrationMessageWaiter } from './mailbox-pointer-eligibility'
 
@@ -28,6 +28,9 @@ type PointerDeliveryDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   getTabTitle: (tabId: string) => string | null | undefined
   getTerminalHandleForLeafKey: (leafKey: string) => string | undefined
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
+  lastUserInputAt?: (ptyId: string) => number | undefined
+  isOrcaWindowFocused?: () => boolean
+  scheduleMailboxRetry?: (mailboxHandle: string, delayMs: number) => void
   redriveMailbox: (mailboxHandle: string, reservedTypes?: ReadonlySet<string>) => void
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
 }
@@ -84,26 +87,12 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
     }
 
     const waiters = this.deps.getMessageWaiters(mailboxHandle)
-    if (hasUnfilteredOrchestrationWaiter(waiters)) {
-      return
-    }
-    const excludedTypes = new Set(options.reservedTypes)
-    for (const waiter of waiters ?? []) {
-      for (const type of waiter.typeFilter ?? []) {
-        excludedTypes.add(type)
-      }
-    }
-    const unread = db
-      .getUndeliveredUnreadMessages(mailboxHandle, undefined, {
-        excludeTypes: [...excludedTypes],
-        limit: ORCHESTRATION_DELIVERY_BATCH_LIMIT
-      })
-      .filter(
-        (message) =>
-          !options.reservedTypes?.has(message.type) &&
-          !messageTypeHasOrchestrationWaiter(waiters, message.type)
-      )
-      .slice(0, ORCHESTRATION_DELIVERY_BATCH_LIMIT)
+    const unread = collectDeliverableMailboxPointerMessages(
+      db,
+      mailboxHandle,
+      waiters,
+      options.reservedTypes
+    )
     if (unread.length === 0 || !leaf.writable || !leaf.ptyId) {
       return
     }
@@ -130,6 +119,10 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
           this.redeliverAfterProbe(probedLeaf, ptyId, probedMailbox)
       )
     ) {
+      return
+    }
+    // #14832: don't inject into a prompt the user is editing in a focused Orca window
+    if (deferMailboxPointerForRecentTyping({ ptyId: leaf.ptyId, mailboxHandle, ...this.deps })) {
       return
     }
     this.stagePointer(leaf, mailboxHandle, unread, newestSequence)
@@ -261,6 +254,8 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
               getLeafKey: this.deps.getLeafKey,
               getMessageWaiters: this.deps.getMessageWaiters,
               isLeafPtyProvenAbsent: this.deps.isLeafPtyProvenAbsent,
+              lastUserInputAt: this.deps.lastUserInputAt,
+              isOrcaWindowFocused: this.deps.isOrcaWindowFocused,
               writePty: this.deps.writePty,
               settle: (settledPtyId, settledFlight) => this.settle(settledPtyId, settledFlight),
               redrive: (redriveMailbox, force) => this.redrive(redriveMailbox, force)

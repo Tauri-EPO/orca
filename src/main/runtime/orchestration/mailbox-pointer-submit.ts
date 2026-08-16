@@ -8,6 +8,7 @@ import type {
   OrchestrationMailboxDeliveryFlight,
   OrchestrationMailboxPointerState
 } from './mailbox-pointer-state'
+import { shouldDeferMailboxPointerEnter } from './mailbox-pointer-typing-guard'
 
 type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   mailboxOwner: OrchestrationMailboxOwner
@@ -17,6 +18,8 @@ type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   getLeafKey: (tabId: string, leafId: string) => string
   getMessageWaiters: (mailboxHandle: string) => ReadonlySet<TWaiter> | undefined
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
+  lastUserInputAt?: (ptyId: string) => number | undefined
+  isOrcaWindowFocused?: () => boolean
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
@@ -66,7 +69,12 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
           )
         ) {
           releaseWithoutRedrive = true
-        } else {
+        } else if (
+          !shouldDeferMailboxPointerEnter({
+            lastUserInputAt: deps.lastUserInputAt?.(input.ptyId),
+            isOrcaWindowFocused: deps.isOrcaWindowFocused?.() === true
+          })
+        ) {
           submitted = await deps.writePty(input.ptyId, '\r')
         }
       }

@@ -3,7 +3,7 @@ import { join, delimiter } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import {
-  type BrowserWindow,
+  BrowserWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   type WebContents,
@@ -5431,6 +5431,18 @@ export function registerPtyHandlers(
     write: (ptyId, data) => {
       try {
         return getProviderForPty(ptyId).write(ptyId, data) !== false
+      } catch {
+        return false
+      }
+    },
+    lastUserInputAt: (ptyId) => lastInputAtByPty.get(ptyId),
+    isOrcaWindowFocused: () => {
+      try {
+        if (!mainWindow.isDestroyed() && mainWindow.isFocused()) {
+          return true
+        }
+        const focused = BrowserWindow?.getFocusedWindow?.()
+        return focused != null && focused.isDestroyed?.() !== true
       } catch {
         return false
       }
