@@ -28,6 +28,41 @@ describe('OrchestrationDb dispatch liveness', () => {
     return db
   }
 
+  describe('listActiveDispatchesForRun', () => {
+    it('returns only pending and dispatched rows for the given run, oldest first', () => {
+      const d = createDb()
+      const run = d.createRun({
+        objective: 'fleet',
+        coordinatorHandle: 'term_coord',
+        coordinatorPaneKey: 'tab_coord:11111111-1111-4111-8111-111111111111'
+      })
+      const active = d.createTask({ runId: run.id, spec: 'a' })
+      const done = d.createTask({ runId: run.id, spec: 'b' })
+      const firstDispatch = d.createDispatchContext(active.id, 'term_a')
+      const secondDispatch = d.createDispatchContext(done.id, 'term_b')
+      d.completeDispatch(secondDispatch.id)
+
+      const rows = d.listActiveDispatchesForRun(run.id, 10)
+
+      expect(rows.map((row) => row.id)).toEqual([firstDispatch.id])
+    })
+
+    it('caps the result at the requested limit', () => {
+      const d = createDb()
+      const run = d.createRun({
+        objective: 'fleet',
+        coordinatorHandle: 'term_coord',
+        coordinatorPaneKey: 'tab_coord:11111111-1111-4111-8111-111111111111'
+      })
+      for (let index = 0; index < 5; index++) {
+        const task = d.createTask({ runId: run.id, spec: `task ${index}` })
+        d.createDispatchContext(task.id, `term_${index}`)
+      }
+
+      expect(d.listActiveDispatchesForRun(run.id, 3)).toHaveLength(3)
+    })
+  })
+
   describe('recordHeartbeat + getStaleDispatches', () => {
     it('recordHeartbeat updates last_heartbeat_at on dispatched rows', () => {
       const d = createDb()

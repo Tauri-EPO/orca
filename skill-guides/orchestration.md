@@ -391,6 +391,21 @@ Wait for `tui-idle` before dispatching. Always pass `--timeout-ms`; real coding 
 - Coordinators must account for every settled worker terminal before waiting again or ending the turn: immediately reuse the exact worker for a new Dispatch, explicitly retain it at the user's request with `worker-retain`, or run `worker-release`. Do not leave a completed worker live merely to inspect output; released workers remain readable through `worker-read`.
 - Coordinators should use `task-list --ready` as external memory, dispatch parallel waves, and avoid dependency chains deeper than 3-4 steps.
 
+## Fleet Echo
+
+`check` returns an optional `fleet` block: a live snapshot of active dispatches (`pending`/`dispatched` only) on the current Run, up to 12 lanes, with `truncated: true` when more exist. Under `--json` the block is `result.fleet`; in text mode it prints as a trailing block. Suppress it with `--no-fleet`.
+
+Each lane:
+
+```
+<handle>  <taskId>  <dispatchId>  <lifecycle>  <quietMs>  <delivery>[ (<processState>)]
+```
+
+- `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but never started a turn. Re-dispatch that lane; waiting on it will never resolve. Text mode renders this as `NOT_ACCEPTED`, deliberately loud.
+- `processState` is `dead` or `unknown` — never `live` on this build. A connected PTY doesn't prove the agent inside it is alive, so the runtime won't claim liveness it hasn't verified. `unknown` is not an error.
+- Federated (remote) lanes report `unknown` for `processState` only — liveness facts are host-local, and only the runtime that owns the PTY has them. `delivery` still resolves normally: federated worker-start writes `stage='input_accepted'` to the local worker-dispatch row just like a local start, so these lanes report `accepted` once the remote worker is ready.
+- `check --wait` returns `fleet` on timeout too, so a timeout tells you why nobody spoke, not just that nobody did.
+
 ## Example
 
 ```bash

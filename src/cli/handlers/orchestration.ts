@@ -33,6 +33,8 @@ import {
   type OrchestrationMessageSummary as MessageSummary
 } from '../../shared/orchestration-check-output'
 import { orchestrationMutationRecoveryError } from '../orchestration-mutation-recovery'
+import { formatFleetEcho } from './orchestration-fleet-echo-format'
+import type { FleetEcho } from '../../shared/orchestration-fleet-echo'
 
 // Why: 15 s is well under Claude Code's ~2 min Bash-tool silence budget while keeping log volume low. See design doc §3.4.
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 15_000
@@ -478,6 +480,17 @@ function formatWorkerRelease(value: WorkerReleaseReceipt): string {
   return lines.join('\n')
 }
 
+// Why: --json keeps `fleet` inside the payload untouched; text mode renders it as a trailing block.
+function printFleetEcho(fleet: FleetEcho | undefined, json: boolean): void {
+  if (json || !fleet) {
+    return
+  }
+  const text = formatFleetEcho(fleet)
+  if (text) {
+    console.log(text)
+  }
+}
+
 function safeJson(value: unknown): string {
   try {
     return JSON.stringify(value)
@@ -661,6 +674,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       cancelled?: boolean
       connectionLost?: boolean
       legacyCompatibility?: LegacyCompatibilityResult
+      fleet?: FleetEcho
     }
     let result: Awaited<ReturnType<typeof client.call<CheckResult>>>
     try {
@@ -678,7 +692,8 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         run: getOptionalStringFlag(flags, 'run'),
         ack: getOptionalStringFlag(flags, 'ack'),
         wait: wait ? true : undefined,
-        timeoutMs
+        timeoutMs,
+        ...(flags.has('no-fleet') ? { fleet: false } : {})
       })
     } finally {
       stopKeepalive?.()
@@ -716,6 +731,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       result: prepareOrchestrationCheckOutput(result.result, terminal, flags.has('format'))
     }
     printResult(result, json, (r) => formatOrchestrationCheckText(r, terminal))
+    printFleetEcho(result.result.fleet, json)
     const compatibilityAck = result.result.legacyCompatibility?.ackMessageIds
     if (compatibilityAck && compatibilityAck.length > 0) {
       await flushStdout()

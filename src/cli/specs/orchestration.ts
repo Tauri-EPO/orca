@@ -103,7 +103,8 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'format',
       'wait',
       'timeout-ms',
-      'retry-request'
+      'retry-request',
+      'no-fleet'
     ],
     notes: [
       'On Windows PowerShell, quote comma-separated type filters, e.g. --types "worker_done,escalation".',

@@ -23,6 +23,7 @@ import {
 } from '../../../../shared/orchestration-rpc-contract'
 import { clampOrchestrationAskTimeoutMs } from '../../../../shared/orchestration-ask-timeout'
 import { ORCHESTRATION_GATE_METHODS } from './orchestration-gates'
+import { attachFleetEcho } from './orchestration-fleet-echo-sources'
 import {
   resolveBareOrchestrationRecipient,
   type SendRecipientWarning
@@ -178,7 +179,8 @@ const CheckParams = z
     compatibilityCliCommand: z.enum(['orca', 'orca-ide', 'orca-dev']).optional(),
     run: OptionalString,
     wait: OptionalBoolean,
-    timeoutMs: OptionalFiniteNumber
+    timeoutMs: OptionalFiniteNumber,
+    fleet: OptionalBoolean
   })
   .superRefine((params, ctx) => {
     // Why: CLI encodes --peek as {peek:true, unread:false} for pre-peek runtimes, so that pair is one mode, not a conflict.
@@ -912,6 +914,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       const db = runtime.getOrchestrationDb()
       const handle = params.terminal ?? 'unknown'
       const typeFilter = parseMessageTypes(params.types)
+      const fleetEnabled = params.fleet !== false
       const routeDirectSnapshot = async (
         runId: string,
         directHandle: string,
@@ -984,13 +987,13 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             acknowledged: acknowledged?.delivery.id ?? null
           }
           if (params.format || params.inject) {
-            return {
+            return attachFleetEcho(runtime, run.id, fleetEnabled, {
               ...result,
               formatted: messages.map(formatMessageBanner).join('\n\n'),
               runId: run.id
-            }
+            })
           }
-          return { ...result, runId: run.id }
+          return attachFleetEcho(runtime, run.id, fleetEnabled, { ...result, runId: run.id })
         }
 
         const peekResult = (messages: MessageRow[]) => ({
@@ -1011,11 +1014,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           })
         let peeked = params.peek ? readPeek() : []
         if (params.peek && peeked.length > 0) {
-          return peekResult(peeked)
+          return attachFleetEcho(runtime, run.id, fleetEnabled, peekResult(peeked))
         }
         let current = params.peek ? undefined : readDelivery(params.wait ? typeFilter : undefined)
         if (current) {
-          return {
+          return attachFleetEcho(runtime, run.id, fleetEnabled, {
             runId: run.id,
             deliveryId: current.delivery.id,
             messages: current.messages,
@@ -1028,13 +1031,13 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             ...(params.format || params.inject
               ? { formatted: current.messages.map(formatMessageBanner).join('\n\n') }
               : {})
-          }
+          })
         }
         if (!params.wait) {
           if (params.peek) {
-            return peekResult([])
+            return attachFleetEcho(runtime, run.id, fleetEnabled, peekResult([]))
           }
-          return {
+          return attachFleetEcho(runtime, run.id, fleetEnabled, {
             runId: run.id,
             deliveryId: null,
             messages: [],
@@ -1043,7 +1046,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             timedOut: false,
             cancelled: false,
             connectionLost: false
-          }
+          })
         }
 
         const waitResult = await runtime.waitForMessage(address, {
@@ -1058,12 +1061,22 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           if (!acknowledged) {
             throw error
           }
-          return interruptedAcknowledgedCheck(run.id, acknowledged.delivery.id, 'consumer_fenced')
+          return attachFleetEcho(
+            runtime,
+            run.id,
+            fleetEnabled,
+            interruptedAcknowledgedCheck(run.id, acknowledged.delivery.id, 'consumer_fenced')
+          )
         }
         const latestRun = db.getRun(run.id)
         if (!latestRun || latestRun.consumer_generation !== generation) {
           if (acknowledged) {
-            return interruptedAcknowledgedCheck(run.id, acknowledged.delivery.id, 'consumer_fenced')
+            return attachFleetEcho(
+              runtime,
+              run.id,
+              fleetEnabled,
+              interruptedAcknowledgedCheck(run.id, acknowledged.delivery.id, 'consumer_fenced')
+            )
           }
           throw new OrchestrationError(
             'consumer_fenced',
@@ -1072,7 +1085,12 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         }
         if (waitResult === 'waiter_exists') {
           if (acknowledged) {
-            return interruptedAcknowledgedCheck(run.id, acknowledged.delivery.id, 'waiter_exists')
+            return attachFleetEcho(
+              runtime,
+              run.id,
+              fleetEnabled,
+              interruptedAcknowledgedCheck(run.id, acknowledged.delivery.id, 'waiter_exists')
+            )
           }
           throw new OrchestrationError(
             'waiter_exists',
@@ -1081,9 +1099,14 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         }
         if (waitResult === 'timed_out') {
           if (params.peek) {
-            return { ...peekResult([]), timedOut: true, cancelled: false, connectionLost: false }
+            return attachFleetEcho(runtime, run.id, fleetEnabled, {
+              ...peekResult([]),
+              timedOut: true,
+              cancelled: false,
+              connectionLost: false
+            })
           }
-          return {
+          return attachFleetEcho(runtime, run.id, fleetEnabled, {
             runId: run.id,
             deliveryId: null,
             messages: [],
@@ -1092,18 +1115,18 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             timedOut: true,
             cancelled: false,
             connectionLost: false
-          }
+          })
         }
         if (waitResult === 'cancelled') {
           if (params.peek) {
-            return {
+            return attachFleetEcho(runtime, run.id, fleetEnabled, {
               ...peekResult([]),
               timedOut: false,
               cancelled: true,
               connectionLost: signal?.aborted === true
-            }
+            })
           }
-          return {
+          return attachFleetEcho(runtime, run.id, fleetEnabled, {
             runId: run.id,
             deliveryId: null,
             messages: [],
@@ -1112,20 +1135,20 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             timedOut: false,
             cancelled: true,
             connectionLost: signal?.aborted === true
-          }
+          })
         }
 
         if (params.peek) {
           peeked = readPeek()
-          return {
+          return attachFleetEcho(runtime, run.id, fleetEnabled, {
             ...peekResult(peeked),
             timedOut: false,
             cancelled: false,
             connectionLost: false
-          }
+          })
         }
         current = readDelivery(typeFilter)
-        return {
+        return attachFleetEcho(runtime, run.id, fleetEnabled, {
           runId: run.id,
           deliveryId: current?.delivery.id ?? null,
           messages: current?.messages ?? [],
@@ -1138,7 +1161,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           ...(params.format && current
             ? { formatted: current.messages.map(formatMessageBanner).join('\n\n') }
             : {})
-        }
+        })
       }
 
       const activeDispatch = db.getActiveDispatchForIdentity(handle, paneKey ?? undefined)
@@ -1262,7 +1285,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           db.markAsRead(messages.map((message) => message.id))
         }
         if (messages.length > 0 || !params.wait) {
-          return {
+          return attachFleetEcho(runtime, workerMailbox.runId ?? null, fleetEnabled, {
             ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
             dispatchId: workerMailbox.dispatchId,
             messages,
@@ -1270,7 +1293,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             ...(params.format || params.inject
               ? { formatted: messages.map(formatMessageBanner).join('\n\n') }
               : {})
-          }
+          })
         }
         const waitResult = await runtime.waitForMessage(address, {
           typeFilter: typeFilter as string[] | undefined,
@@ -1279,7 +1302,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         })
         await revalidateWorkerMailbox()
         if (waitResult === 'timed_out' || waitResult === 'cancelled') {
-          return {
+          return attachFleetEcho(runtime, workerMailbox.runId ?? null, fleetEnabled, {
             ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
             dispatchId: workerMailbox.dispatchId,
             messages: [],
@@ -1287,11 +1310,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             timedOut: waitResult === 'timed_out',
             cancelled: waitResult === 'cancelled',
             connectionLost: waitResult === 'cancelled' && signal?.aborted === true
-          }
+          })
         }
         const arrived = db.getUnreadMessages(address, typeFilter)
         db.markAsRead(arrived.map((message) => message.id))
-        return {
+        return attachFleetEcho(runtime, workerMailbox.runId ?? null, fleetEnabled, {
           ...(workerMailbox.runId ? { runId: workerMailbox.runId } : {}),
           dispatchId: workerMailbox.dispatchId,
           messages: arrived,
@@ -1299,7 +1322,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           ...(params.format || params.inject
             ? { formatted: arrived.map(formatMessageBanner).join('\n\n') }
             : {})
-        }
+        })
       }
 
       // Why: unread:false is honored for one release as a compat shim so in-flight callers don't break (design doc §5).
@@ -1343,11 +1366,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       }
 
       if (signal?.aborted) {
-        return { messages: [], count: 0 }
+        return attachFleetEcho(runtime, null, fleetEnabled, { messages: [], count: 0 })
       }
       const result = readAndReturn()
       if (result.count > 0 || !params.wait) {
-        return result
+        return attachFleetEcho(runtime, null, fleetEnabled, result)
       }
 
       // Why: signal aborts this waiter when the client socket closes, freeing the long-poll slot immediately rather than after timeoutMs (design doc §3.1).
@@ -1357,7 +1380,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         signal
       })
       if (signal?.aborted) {
-        return { messages: [], count: 0 }
+        return attachFleetEcho(runtime, null, fleetEnabled, { messages: [], count: 0 })
       }
       if (waitResult === 'cancelled') {
         throw new OrchestrationError(
@@ -1365,7 +1388,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
           'This direct mailbox became owned by a Run while the check was waiting.'
         )
       }
-      return readAndReturn()
+      return attachFleetEcho(runtime, null, fleetEnabled, readAndReturn())
     }
   }),
 
