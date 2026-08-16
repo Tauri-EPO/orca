@@ -1881,7 +1881,7 @@ const BRACKETED_PASTE_END = '\x1b[201~'
 const BRACKETED_PASTE_QUIET_MS = 1500
 const AGENT_PROMPT_RENDER_TIMEOUT_MS = 8000
 const AGENT_PROMPT_RENDER_QUIET_MS = 1500
-// Why: Claude and Codex emit show-cursor after accepting bracketed paste.
+// Why: Claude, Codex, and cursor-agent composers emit show-cursor after accepting bracketed paste.
 const AGENT_PROMPT_RENDER_MARKER = '\x1b[?25h'
 const MOBILE_TERMINAL_SURFACE_TIMEOUT_MS = 10_000
 // Why: the split already failed; the caller waits on this teardown only to learn whether the
@@ -38393,8 +38393,8 @@ function classifyAgentTitle(title: string | null): 'agent' | 'management' | 'neu
 
 function isTerminalSendSettlementAgent(
   agent: TuiAgent | null | undefined
-): agent is 'claude' | 'codex' {
-  return agent === 'claude' || agent === 'codex'
+): agent is 'claude' | 'codex' | 'cursor' {
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor'
 }
 
 function terminalTitleBlocksExplicitAgentStatus(title: string | null): boolean {
