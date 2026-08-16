@@ -8,7 +8,7 @@ import type {
   OrchestrationMailboxDeliveryFlight,
   OrchestrationMailboxPointerState
 } from './mailbox-pointer-state'
-import { shouldDeferMailboxPointerEnter } from './mailbox-pointer-typing-guard'
+import { remainingMailPointerTypingQuiesceMs } from './mailbox-pointer-typing-guard'
 
 type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   mailboxOwner: OrchestrationMailboxOwner
@@ -20,6 +20,7 @@ type PointerSubmitDependencies<TWaiter extends OrchestrationMessageWaiter> = {
   isLeafPtyProvenAbsent: (ptyId: string) => Promise<boolean>
   lastUserInputAt?: (ptyId: string) => number | undefined
   isOrcaWindowFocused?: () => boolean
+  scheduleMailboxRetry?: (mailboxHandle: string, delayMs: number) => void
   writePty: (ptyId: string, data: string) => boolean | Promise<boolean>
   settle: (ptyId: string, flight: OrchestrationMailboxDeliveryFlight) => void
   redrive: (mailboxHandle: string, force?: boolean) => void
@@ -69,13 +70,20 @@ export function submitOrchestrationMailboxPointer<TWaiter extends OrchestrationM
           )
         ) {
           releaseWithoutRedrive = true
-        } else if (
-          !shouldDeferMailboxPointerEnter({
+        } else {
+          const remaining = remainingMailPointerTypingQuiesceMs({
             lastUserInputAt: deps.lastUserInputAt?.(input.ptyId),
             isOrcaWindowFocused: deps.isOrcaWindowFocused?.() === true
           })
-        ) {
-          submitted = await deps.writePty(input.ptyId, '\r')
+          if (remaining !== null) {
+            // #14832: retry after quiet for later unread; keep delivered_at so this pointer is not rewritten
+            deps.scheduleMailboxRetry?.(
+              input.mailboxHandle,
+              Math.max(1, Math.ceil(remaining))
+            )
+          } else {
+            submitted = await deps.writePty(input.ptyId, '\r')
+          }
         }
       }
     })

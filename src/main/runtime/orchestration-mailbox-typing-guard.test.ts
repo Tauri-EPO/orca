@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  checkBoundMailbox,
   createBoundRun,
   createDatabase,
   createRuntime,
@@ -138,14 +139,25 @@ describe('orchestration mail pointer typing guard', () => {
     }
     installTypingGuard(harness, state)
     const run = createBoundRun(db, 'Enter typing Run')
-    insertDirectRunMessage(db, run.id, 'Pointer already injected')
+    const message = insertDirectRunMessage(db, run.id, 'Pointer already injected')
 
     await driveToLiveIdle(harness.runtime)
     expect(pointerCount(harness.write)).toBe(1)
     state.lastUserInputAt = performance.now()
+    const redrive = vi.spyOn(harness.runtime, 'deliverPendingMessagesForHandle')
 
     await vi.advanceTimersByTimeAsync(500)
     expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
+    expect(db.getMessageById(message.id)?.delivered_at).toEqual(expect.any(String))
+    expect(redrive).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(redrive).toHaveBeenCalledWith(`run:${run.id}`)
+    expect(pointerCount(harness.write)).toBe(1)
+    expect(harness.write.mock.calls.filter(([, payload]) => payload === '\r')).toHaveLength(0)
+
+    const checked = await checkBoundMailbox(harness.runtime)
+    expect(checked).toMatchObject({ runId: run.id, count: 1 })
     db.close()
   })
 })

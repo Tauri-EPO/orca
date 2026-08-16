@@ -256,6 +256,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
               isLeafPtyProvenAbsent: this.deps.isLeafPtyProvenAbsent,
               lastUserInputAt: this.deps.lastUserInputAt,
               isOrcaWindowFocused: this.deps.isOrcaWindowFocused,
+              scheduleMailboxRetry: this.deps.scheduleMailboxRetry,
               writePty: this.deps.writePty,
               settle: (settledPtyId, settledFlight) => this.settle(settledPtyId, settledFlight),
               redrive: (redriveMailbox, force) => this.redrive(redriveMailbox, force)
