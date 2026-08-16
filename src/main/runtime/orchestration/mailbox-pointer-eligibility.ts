@@ -1,4 +1,4 @@
-import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, type OrchestrationDb } from './db'
+import type { OrchestrationDb } from './db'
 
 export type OrchestrationMessageWaiter = { typeFilter: string[] | undefined }
 
@@ -46,32 +46,4 @@ export function shouldReleaseOrchestrationPointer(
       messages.map((message) => message.id)
     ) ?? true
   )
-}
-
-export function collectDeliverableMailboxPointerMessages(
-  db: OrchestrationDb,
-  mailboxHandle: string,
-  waiters: ReadonlySet<OrchestrationMessageWaiter> | undefined,
-  reservedTypes?: ReadonlySet<string>
-): { id: string; type: string; sequence: number }[] {
-  if (hasUnfilteredOrchestrationWaiter(waiters)) {
-    return []
-  }
-  const excludedTypes = new Set(reservedTypes)
-  for (const waiter of waiters ?? []) {
-    for (const type of waiter.typeFilter ?? []) {
-      excludedTypes.add(type)
-    }
-  }
-  return db
-    .getUndeliveredUnreadMessages(mailboxHandle, undefined, {
-      excludeTypes: [...excludedTypes],
-      limit: ORCHESTRATION_DELIVERY_BATCH_LIMIT
-    })
-    .filter(
-      (message) =>
-        !reservedTypes?.has(message.type) &&
-        !messageTypeHasOrchestrationWaiter(waiters, message.type)
-    )
-    .slice(0, ORCHESTRATION_DELIVERY_BATCH_LIMIT)
 }

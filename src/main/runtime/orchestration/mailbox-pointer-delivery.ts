@@ -1,9 +1,10 @@
 import { isCursorAgentTitle } from '../../../shared/agent-detection'
-import type { OrchestrationDb } from './db'
+import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, type OrchestrationDb } from './db'
 import { formatMessagePointer } from './formatter'
 import type { OrchestrationMailboxDeliveryTarget } from './mailbox-delivery-target'
 import {
-  collectDeliverableMailboxPointerMessages,
+  hasUnfilteredOrchestrationWaiter,
+  messageTypeHasOrchestrationWaiter,
   shouldReleaseOrchestrationPointer,
   type OrchestrationMessageWaiter
 } from './mailbox-pointer-eligibility'
@@ -82,17 +83,31 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
       return
     }
     if (this.state.hasActiveWatermark(mailboxHandle)) {
-      this.parkRedelivery(mailboxHandle, options.reservedTypes)
+      this.state.parkRedelivery(mailboxHandle, options.reservedTypes)
       return
     }
 
     const waiters = this.deps.getMessageWaiters(mailboxHandle)
-    const unread = collectDeliverableMailboxPointerMessages(
-      db,
-      mailboxHandle,
-      waiters,
-      options.reservedTypes
-    )
+    if (hasUnfilteredOrchestrationWaiter(waiters)) {
+      return
+    }
+    const excludedTypes = new Set(options.reservedTypes)
+    for (const waiter of waiters ?? []) {
+      for (const type of waiter.typeFilter ?? []) {
+        excludedTypes.add(type)
+      }
+    }
+    const unread = db
+      .getUndeliveredUnreadMessages(mailboxHandle, undefined, {
+        excludeTypes: [...excludedTypes],
+        limit: ORCHESTRATION_DELIVERY_BATCH_LIMIT
+      })
+      .filter(
+        (message) =>
+          !options.reservedTypes?.has(message.type) &&
+          !messageTypeHasOrchestrationWaiter(waiters, message.type)
+      )
+      .slice(0, ORCHESTRATION_DELIVERY_BATCH_LIMIT)
     if (unread.length === 0 || !leaf.writable || !leaf.ptyId) {
       return
     }
@@ -126,10 +141,6 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
       return
     }
     this.stagePointer(leaf, mailboxHandle, unread, newestSequence)
-  }
-
-  parkRedelivery(mailboxHandle: string, reservedTypes?: ReadonlySet<string>): void {
-    this.state.parkRedelivery(mailboxHandle, reservedTypes)
   }
 
   retirePty(ptyId: string): void {
@@ -247,17 +258,8 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         () =>
           submitOrchestrationMailboxPointer(
             {
-              mailboxOwner: this.deps.mailboxOwner,
+              ...this.deps,
               state: this.state,
-              getDb: this.deps.getDb,
-              getLeaf: this.deps.getLeaf,
-              getLeafKey: this.deps.getLeafKey,
-              getMessageWaiters: this.deps.getMessageWaiters,
-              isLeafPtyProvenAbsent: this.deps.isLeafPtyProvenAbsent,
-              lastUserInputAt: this.deps.lastUserInputAt,
-              isOrcaWindowFocused: this.deps.isOrcaWindowFocused,
-              scheduleMailboxRetry: this.deps.scheduleMailboxRetry,
-              writePty: this.deps.writePty,
               settle: (settledPtyId, settledFlight) => this.settle(settledPtyId, settledFlight),
               redrive: (redriveMailbox, force) => this.redrive(redriveMailbox, force)
             },
@@ -284,7 +286,7 @@ export class OrchestrationMailboxPointerDelivery<TWaiter extends OrchestrationMe
         currentLeaf?.ptyId !== ptyId ||
         this.deps.mailboxOwner.resolve(currentLeaf, mailboxHandle) !== mailboxHandle
       ) {
-        this.parkRedelivery(mailboxHandle, delivery.reservedTypes)
+        this.state.parkRedelivery(mailboxHandle, delivery.reservedTypes)
         this.redrive(mailboxHandle)
       } else {
         this.deliver(currentLeaf, { mailboxHandle, reservedTypes: delivery.reservedTypes })
