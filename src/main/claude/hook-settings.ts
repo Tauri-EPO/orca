@@ -10,10 +10,13 @@ import {
   type HookDefinition,
   type HooksConfig
 } from '../agent-hooks/installer-utils'
+import type { ManagedHookCommandMigration } from '../agent-hooks/managed-hook-config-refresh'
 import { wrapRuntimeHomeHookCommand } from '../agent-hooks/runtime-home-hook-command'
 import {
   getWindowsAgentHookCommand,
-  getWindowsAgentHookJsonCommand
+  getWindowsAgentHookCommandAsync,
+  getWindowsAgentHookJsonCommand,
+  getWindowsAgentHookJsonCommandAsync
 } from '../agent-hooks/windows-agent-hook-launcher'
 
 export type ClaudeCompatibleHookSettings = {
@@ -127,6 +130,29 @@ export function getLocalManagedCommand(scriptPath: string): string {
   return process.platform === 'win32'
     ? getWindowsAgentHookCommand(scriptPath)
     : getManagedCommand(scriptPath)
+}
+
+export function getWindowsManagedCommandMigrations(
+  settings: ClaudeCompatibleHookSettings,
+  lifecycleScriptPresent: boolean,
+  statusLineScriptPresent: boolean
+): ManagedHookCommandMigration[] {
+  const migrations: ManagedHookCommandMigration[] = []
+  if (lifecycleScriptPresent) {
+    const scriptPath = getManagedScriptPath(settings)
+    migrations.push({
+      scriptFileName: getManagedScriptFileName(settings),
+      resolveCommand: () => getWindowsAgentHookJsonCommandAsync(scriptPath)
+    })
+  }
+  if (statusLineScriptPresent) {
+    const scriptPath = getStatusLineScriptPath(settings)
+    migrations.push({
+      scriptFileName: getStatusLineScriptFileName(settings),
+      resolveCommand: () => getWindowsAgentHookCommandAsync(scriptPath)
+    })
+  }
+  return migrations
 }
 
 export function getWindowsManagedLifecycleHook(scriptPath: string): HookCommandConfig {

@@ -13,7 +13,7 @@ import {
   writeManagedScript,
   type HookDefinition
 } from '../agent-hooks/installer-utils'
-import { refreshManagedHookCommandIfPresent } from '../agent-hooks/managed-hook-config-refresh'
+import { refreshManagedHookCommandsIfPresent } from '../agent-hooks/managed-hook-config-refresh'
 import {
   getWindowsAgentHookCommand,
   getWindowsAgentHookCommandAsync
@@ -193,7 +193,7 @@ export class GrokHookService {
       getManagedScript()
     )
     if (process.platform === 'win32' && scriptPresent) {
-      await refreshManagedHookCommandIfPresent({
+      await refreshManagedHookCommandsIfPresent({
         configPath: getConfigPath(),
         scriptFileName: getManagedScriptFileName(),
         resolveCommand: () => getWindowsAgentHookCommandAsync(getManagedScriptPath())

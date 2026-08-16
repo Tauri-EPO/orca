@@ -71,7 +71,8 @@ vi.mock('./windows-agent-hook-launcher', async () => {
 })
 
 import { refreshManagedScriptIfPresent } from './managed-hook-script-refresh'
-import { refreshManagedHookCommandIfPresent } from './managed-hook-config-refresh'
+import { refreshManagedHookCommandsIfPresent } from './managed-hook-config-refresh'
+import { wrapRuntimeHomeHookCommand } from './runtime-home-hook-command'
 import {
   MANAGED_AGENT_HOOK_INSTALLERS,
   MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS
@@ -155,7 +156,7 @@ describe('managed hook script refresh', () => {
     }
   })
 
-  it('migrates an existing Windows config even when CLI presence is unavailable', async () => {
+  it('migrates existing Windows hooks and statusline when CLI presence is unavailable', async () => {
     const home = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-config-'))
     homedirMock.mockReturnValue(home)
     try {
@@ -164,7 +165,9 @@ describe('managed hook script refresh', () => {
       mkdirSync(hooksDir, { recursive: true })
       mkdirSync(configDir, { recursive: true })
       const scriptPath = join(hooksDir, 'claude-hook.cmd')
+      const statusLineScriptPath = join(hooksDir, 'claude-statusline.cmd')
       writeFileSync(scriptPath, STALE_WINDOWS_HOOK)
+      writeFileSync(statusLineScriptPath, 'stale statusline')
       writeFileSync(
         join(configDir, 'settings.json'),
         `${JSON.stringify({
@@ -180,6 +183,10 @@ describe('managed hook script refresh', () => {
                 ]
               }
             ]
+          },
+          statusLine: {
+            type: 'command',
+            command: wrapRuntimeHomeHookCommand('claude-statusline')
           }
         })}\n`
       )
@@ -192,6 +199,9 @@ describe('managed hook script refresh', () => {
         `"${join(hooksDir, 'orca-agent-hook.exe')}" --neutral-json "${scriptPath}"`
       )
       expect(hook.args).toBeUndefined()
+      expect(config.statusLine.command).toBe(
+        `"${join(hooksDir, 'orca-agent-hook.exe')}" "${statusLineScriptPath}"`
+      )
     } finally {
       homedirMock.mockImplementation(() => process.env.HOME ?? tmpdir())
       rmSync(home, { recursive: true, force: true })
@@ -212,7 +222,7 @@ describe('managed hook script refresh', () => {
     )
     try {
       await expect(
-        refreshManagedHookCommandIfPresent({
+        refreshManagedHookCommandsIfPresent({
           configPath,
           scriptFileName: 'claude-hook.cmd',
           resolveCommand: async () => {

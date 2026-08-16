@@ -9,14 +9,11 @@ import {
   writeManagedScript,
   type HooksConfig
 } from '../agent-hooks/installer-utils'
-import { refreshManagedHookCommandIfPresent } from '../agent-hooks/managed-hook-config-refresh'
 import {
   readHooksJsonRemote,
   writeHooksJsonRemote,
   writeManagedScriptRemote
 } from '../agent-hooks/installer-utils-remote'
-import { refreshManagedScriptIfPresent } from '../agent-hooks/managed-hook-script-refresh'
-import { getWindowsAgentHookJsonCommandAsync } from '../agent-hooks/windows-agent-hook-launcher'
 import {
   buildPosixHookPayloadCapture,
   buildWindowsHookEnvironmentGuardLines,
@@ -24,6 +21,7 @@ import {
   WINDOWS_HOOK_STDIN_DRAIN_LABEL
 } from '../agent-hooks/hook-stdin-contract'
 import { getManagedStatusLineScript } from './statusline-script'
+import { refreshClaudeManagedScripts } from './claude-managed-script-refresh'
 import {
   applyManagedHooks,
   applyManagedStatusLine,
@@ -178,23 +176,10 @@ export class ClaudeHookService {
   }
 
   async refreshManagedScripts(): Promise<void> {
-    const lifecycleScriptPresent = await refreshManagedScriptIfPresent(
-      getManagedScriptPath(this.options.settings),
+    await refreshClaudeManagedScripts(
+      this.options.settings,
       getManagedScript('local', { skipWhenDevinImportsClaude: this.options.agent === 'claude' })
     )
-    // Why: no agent gate — the statusline script only ever exists for claude, so presence is the gate.
-    await refreshManagedScriptIfPresent(
-      getStatusLineScriptPath(this.options.settings),
-      getManagedStatusLineScript('local')
-    )
-    if (process.platform === 'win32' && lifecycleScriptPresent) {
-      const scriptPath = getManagedScriptPath(this.options.settings)
-      await refreshManagedHookCommandIfPresent({
-        configPath: getConfigPath(this.options.settings),
-        scriptFileName: getManagedScriptFileName(this.options.settings),
-        resolveCommand: () => getWindowsAgentHookJsonCommandAsync(scriptPath)
-      })
-    }
   }
 
   install(): AgentHookInstallStatus {

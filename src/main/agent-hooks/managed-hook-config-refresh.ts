@@ -3,15 +3,22 @@ import { copyFile, lstat, readFile, realpath, rename, rm, stat, writeFile } from
 import { dirname, join } from 'node:path'
 import {
   createManagedCommandMatcher,
+  isPlainObject,
   type HookDefinition,
   type HooksConfig
 } from './installer-utils'
 import { parseHooksJsonText } from './hooks-json-read'
 
-type RefreshManagedHookCommandOptions = {
+export type ManagedHookCommandMigration = {
+  scriptFileName: string
+  resolveCommand: () => Promise<string>
+}
+
+type RefreshManagedHookCommandsOptions = {
   configPath: string
   scriptFileName: string
   resolveCommand: () => Promise<string>
+  additionalMigrations?: ManagedHookCommandMigration[]
 }
 
 function isMissingPathError(error: unknown): boolean {
@@ -73,7 +80,47 @@ function migrateManagedCommands(
         : definitions
     ])
   )
-  return { ...config, hooks }
+  const statusLine = config.statusLine
+  if (
+    !isPlainObject(statusLine) ||
+    typeof statusLine.command !== 'string' ||
+    !matches(statusLine.command)
+  ) {
+    return { ...config, hooks }
+  }
+  return { ...config, hooks, statusLine: { ...statusLine, command } }
+}
+
+function configHasManagedCommand(
+  config: HooksConfig,
+  matches: (command: string | undefined) => boolean
+): boolean {
+  const statusLine = config.statusLine
+  if (
+    isPlainObject(statusLine) &&
+    typeof statusLine.command === 'string' &&
+    matches(statusLine.command)
+  ) {
+    return true
+  }
+  return Object.values(config.hooks ?? {}).some(
+    (definitions) =>
+      Array.isArray(definitions) &&
+      definitions.some((definition) => {
+        const direct =
+          matches(definition.command) || matches(definition.bash) || matches(definition.powershell)
+        return (
+          direct ||
+          (Array.isArray(definition.hooks) &&
+            definition.hooks.some(
+              (hook) =>
+                matches(hook.command) ||
+                (Array.isArray(hook.args) &&
+                  hook.args.some((arg) => typeof arg === 'string' && matches(arg)))
+            ))
+        )
+      })
+  )
 }
 
 async function resolveWritePath(configPath: string): Promise<string> {
@@ -145,39 +192,33 @@ async function writeConfigIfUnchanged(
 }
 
 // Why: stale user-wide configs need launcher migration even when the agent CLI is absent.
-export async function refreshManagedHookCommandIfPresent(
-  options: RefreshManagedHookCommandOptions
+export async function refreshManagedHookCommandsIfPresent(
+  options: RefreshManagedHookCommandsOptions
 ): Promise<boolean> {
   const snapshot = await readExistingConfig(options.configPath)
   if (!snapshot) {
     return false
   }
-  const matches = createManagedCommandMatcher(options.scriptFileName)
-  const hasManagedCommand = Object.values(snapshot.config.hooks ?? {}).some(
-    (definitions) =>
-      Array.isArray(definitions) &&
-      definitions.some((definition) => {
-        const direct =
-          matches(definition.command) || matches(definition.bash) || matches(definition.powershell)
-        return (
-          direct ||
-          (Array.isArray(definition.hooks) &&
-            definition.hooks.some(
-              (hook) =>
-                matches(hook.command) ||
-                (Array.isArray(hook.args) &&
-                  hook.args.some((arg) => typeof arg === 'string' && matches(arg)))
-            ))
-        )
-      })
+  const migrations = [
+    { scriptFileName: options.scriptFileName, resolveCommand: options.resolveCommand },
+    ...(options.additionalMigrations ?? [])
+  ]
+  const applicable = migrations.filter((migration) =>
+    configHasManagedCommand(snapshot.config, createManagedCommandMatcher(migration.scriptFileName))
   )
-  if (!hasManagedCommand) {
+  if (applicable.length === 0) {
     return false
   }
-  const command = await options.resolveCommand()
-  return writeConfigIfUnchanged(
-    options.configPath,
-    snapshot.raw,
-    migrateManagedCommands(snapshot.config, options.scriptFileName, command)
+  const resolved = await Promise.all(
+    applicable.map(async (migration) => ({
+      scriptFileName: migration.scriptFileName,
+      command: await migration.resolveCommand()
+    }))
   )
+  const migrated = resolved.reduce(
+    (config, migration) =>
+      migrateManagedCommands(config, migration.scriptFileName, migration.command),
+    snapshot.config
+  )
+  return writeConfigIfUnchanged(options.configPath, snapshot.raw, migrated)
 }
