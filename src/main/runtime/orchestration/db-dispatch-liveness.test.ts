@@ -61,6 +61,38 @@ describe('OrchestrationDb dispatch liveness', () => {
 
       expect(d.listActiveDispatchesForRun(run.id, 3)).toHaveLength(3)
     })
+
+    it('excludes another run and rejects a row whose two run ids disagree', () => {
+      const d = createDb()
+      const mine = d.createRun({
+        objective: 'mine',
+        coordinatorHandle: 'term_mine',
+        coordinatorPaneKey: 'tab_mine:11111111-1111-4111-8111-111111111111'
+      })
+      const theirs = d.createRun({
+        objective: 'theirs',
+        coordinatorHandle: 'term_theirs',
+        coordinatorPaneKey: 'tab_theirs:22222222-2222-4222-8222-222222222222'
+      })
+      const mineTask = d.createTask({ runId: mine.id, spec: 'mine' })
+      const mineDispatch = d.createDispatchContext(mineTask.id, 'term_a')
+      const theirsTask = d.createTask({ runId: theirs.id, spec: 'theirs' })
+      d.createDispatchContext(theirsTask.id, 'term_b')
+
+      expect(d.listActiveDispatchesForRun(mine.id, 10).map((row) => row.id)).toEqual([
+        mineDispatch.id
+      ])
+
+      // Why: run_id is denormalized onto dispatch_contexts; if the two ever diverge the row must drop out rather than leak.
+      ;(d as unknown as { db: Database.Database }).db
+        .prepare('UPDATE dispatch_contexts SET run_id = ? WHERE id = ?')
+        .run(theirs.id, mineDispatch.id)
+
+      expect(d.listActiveDispatchesForRun(mine.id, 10)).toEqual([])
+      expect(d.listActiveDispatchesForRun(theirs.id, 10).map((row) => row.id)).not.toContain(
+        mineDispatch.id
+      )
+    })
   })
 
   describe('recordHeartbeat + getStaleDispatches', () => {

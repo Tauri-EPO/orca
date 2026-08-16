@@ -127,7 +127,12 @@ describe('createFleetEchoSources', () => {
         Date.parse('2026-08-16T00:00:00.000Z')
       )
     } finally {
-      process.env.TZ = originalTz
+      // Why: assigning an undefined back would set the literal string "undefined" and leak into sibling tests in this worker.
+      if (originalTz === undefined) {
+        delete process.env.TZ
+      } else {
+        process.env.TZ = originalTz
+      }
     }
   })
 })

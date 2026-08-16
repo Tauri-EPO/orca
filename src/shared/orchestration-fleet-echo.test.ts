@@ -156,6 +156,20 @@ describe('buildFleetEcho', () => {
     expect(echo.lanes[0].quietMs).toBe(0)
   })
 
+  it('treats an epoch-zero output timestamp as a real time, not as absent', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [dispatch({ dispatchedAt: NOW - 60_000 })],
+        getTerminalSignal: () => ({ lastOutputAt: 0, processState: 'live' })
+      })
+    )
+
+    expect(echo.lanes[0].quietMs).toBe(NOW)
+    // Why: 0 predates the dispatch, so delivery must read it as "nothing since", not as "unknown".
+    expect(echo.lanes[0].delivery).toBe('not_accepted')
+  })
+
   it('caps lanes at the limit and flags truncation', () => {
     const many = Array.from({ length: FLEET_ECHO_MAX_LANES + 3 }, (_unused, index) =>
       dispatch({ dispatchId: `ctx_${index}`, taskId: `task_${index}` })

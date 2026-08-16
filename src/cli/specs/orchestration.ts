@@ -81,7 +81,7 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     path: ['orchestration', 'check'],
     summary: 'Check messages for a terminal',
     usage:
-      'orca orchestration check [--terminal <handle>] [--run <run_id>] [--ack <delivery_id>] [--unread | --peek | --all] [--types <type,...>] [--format] [--wait] [--timeout-ms <n>] [--retry-request <id>] [--json]\n' +
+      'orca orchestration check [--terminal <handle>] [--run <run_id>] [--ack <delivery_id>] [--unread | --peek | --all] [--types <type,...>] [--format] [--wait] [--timeout-ms <n>] [--no-fleet] [--retry-request <id>] [--json]\n' +
       "  default: return the bound Run's oldest unacknowledged FIFO batch.\n" +
       '  --ack: acknowledge the prior whole batch before checking/waiting.\n' +
       '  --peek: return only unread messages without marking them read.\n' +

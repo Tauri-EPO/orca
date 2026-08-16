@@ -79,18 +79,20 @@ export function buildFleetEcho(
   const now = sources.now()
   const lanes = dispatches.slice(0, limit).map((entry): FleetLaneRow => {
     const signal = entry.assigneeHandle ? sources.getTerminalSignal(entry.assigneeHandle) : null
+    const lastOutputAt = signal?.lastOutputAt ?? null
     return {
       handle: entry.assigneeHandle,
       taskId: entry.taskId,
       dispatchId: entry.dispatchId,
       lifecycle: entry.status,
       // Why: a backwards clock must read as "just spoke", never as a negative age.
-      quietMs: signal?.lastOutputAt ? Math.max(0, now - signal.lastOutputAt) : null,
+      // Null-check rather than truthiness so an epoch-zero timestamp means the same thing here as it does to resolveDelivery below.
+      quietMs: lastOutputAt === null ? null : Math.max(0, now - lastOutputAt),
       delivery: resolveDelivery(
         entry.status,
         sources.getWorkerStage(entry.dispatchId),
         entry.dispatchedAt,
-        signal?.lastOutputAt ?? null
+        lastOutputAt
       ),
       processState: signal?.processState ?? 'unknown'
     }

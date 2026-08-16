@@ -720,7 +720,8 @@ describe('orchestration RPC methods', () => {
     function setupRunWithActiveDispatch() {
       setup()
       vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
-      const task = db.createTask({ spec: 'fleet echo work' })
+      // Why: createTask defaults an omitted runId to the legacy Run, which the bound-Run query would then exclude — the lane assertion has to exercise the caller's own Run.
+      const task = db.createTask({ runId: activeRunId as string, spec: 'fleet echo work' })
       const dispatch = db.createDispatchContext(task.id, 'term_worker')
       return { runtime, run: { id: activeRunId as string }, dispatchId: dispatch.id }
     }

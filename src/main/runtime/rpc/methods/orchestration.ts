@@ -1183,7 +1183,11 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       const workerMailbox = activeDispatch
         ? { dispatchId: activeDispatch.id, runId: activeDispatch.run_id }
         : remoteAttachment
-          ? { dispatchId: remoteAttachment.dispatch_id, runId: undefined }
+          ? // Why: the attachment row carries no run_id, so resolve it from the task — without it a remote worker's check gets no fleet block at all.
+            {
+              dispatchId: remoteAttachment.dispatch_id,
+              runId: db.getTask(remoteAttachment.task_id)?.run_id
+            }
           : undefined
       if (workerMailbox) {
         const address = `dispatch:${workerMailbox.dispatchId}`

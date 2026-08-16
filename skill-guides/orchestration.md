@@ -397,7 +397,7 @@ Wait for `tui-idle` before dispatching. Always pass `--timeout-ms`; real coding 
 
 Each lane:
 
-```
+```text
 <handle>  <taskId>  <dispatchId>  <lifecycle>  <quietMs>  <delivery>[ (<processState>)]
 ```
 
