@@ -16914,7 +16914,7 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
-  it.each(['claude', 'codex'] as const)(
+  it.each(['claude', 'codex', 'cursor'] as const)(
     'waits for %s composer output frames to settle before one submit',
     async (agent) => {
       vi.useFakeTimers()
@@ -16990,7 +16990,7 @@ describe('OrcaRuntimeService', () => {
 
   it.each(
     (Object.keys(TUI_AGENT_CONFIG) as TuiAgent[]).filter(
-      (agent) => agent !== 'claude' && agent !== 'codex'
+      (agent) => agent !== 'claude' && agent !== 'codex' && agent !== 'cursor'
     )
   )('preserves the legacy fixed submit delay for %s', async (agent) => {
     vi.useFakeTimers()
@@ -24219,6 +24219,34 @@ describe('OrcaRuntimeService', () => {
     }
   )
 
+  it('authorizes settled CLI prompts after a provider-unwrapped cursor-agent identity', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'cursor-agent'
+    })
+    syncSinglePty(runtime, 'pty-1', { paneTitle: 'bash' })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(runtime.isTerminalRunningSettledPromptAgent(terminal.handle)).resolves.toBe(true)
+  })
+
+  it('does not poll an unresolved node wrapper for speculative cursor CLI settlement', async () => {
+    const getForegroundProcess = vi.fn().mockResolvedValue('node')
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess
+    })
+    syncSinglePty(runtime, 'pty-1', { paneTitle: 'Cursor Agent' })
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(runtime.isTerminalRunningSettledPromptAgent(terminal.handle)).resolves.toBe(false)
+    expect(getForegroundProcess).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps a recognized non-target agent on legacy CLI prompt delivery', async () => {
     const runtime = new OrcaRuntimeService(store)
     runtime.setPtyController({
@@ -24245,6 +24273,24 @@ describe('OrcaRuntimeService', () => {
       command: 'codex',
       title: 'Codex working',
       launchAgent: 'codex'
+    })
+
+    await expect(runtime.isTerminalRunningAgent(handle)).resolves.toBe(true)
+    await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(false)
+  })
+
+  it('keeps stale Cursor launch identity on legacy delivery after the shell returns', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'zsh'
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'cursor-agent',
+      title: 'Cursor working',
+      launchAgent: 'cursor'
     })
 
     await expect(runtime.isTerminalRunningAgent(handle)).resolves.toBe(true)
