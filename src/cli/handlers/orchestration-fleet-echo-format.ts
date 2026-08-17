@@ -14,9 +14,15 @@ function formatQuietMs(quietMs: number | null): string {
   return `${minutes}m${seconds}s`
 }
 
-// Why: NOT_ACCEPTED is the one value a coordinator must not skim past — the whole reason the block exists.
-function formatDelivery(delivery: FleetLaneRow['delivery']): string {
-  return delivery === 'not_accepted' ? 'NOT_ACCEPTED' : delivery
+// Why: NOT_ACCEPTED is the one value a coordinator must not skim past — the whole reason the block
+// exists. The basis rides in the same cell because a verdict and how much it is worth are one fact:
+// ':stage' was read from the worker row, ':output' was inferred from the terminal having stayed quiet.
+function formatDelivery(lane: Pick<FleetLaneRow, 'delivery' | 'deliveryEvidence'>): string {
+  const verdict = lane.delivery === 'not_accepted' ? 'NOT_ACCEPTED' : lane.delivery
+  if (lane.deliveryEvidence === null) {
+    return verdict
+  }
+  return `${verdict}:${lane.deliveryEvidence === 'worker_stage' ? 'stage' : 'output'}`
 }
 
 function padColumn(value: string, width: number): string {
@@ -34,7 +40,7 @@ export function formatFleetEcho(fleet: FleetEcho): string {
     dispatchId: lane.dispatchId,
     lifecycle: lane.lifecycle,
     quietMs: formatQuietMs(lane.quietMs),
-    delivery: formatDelivery(lane.delivery),
+    delivery: formatDelivery(lane),
     // Why: a live PTY proves nothing about the agent inside it, so only dead/unknown earn a call-out.
     // 'live' is unreachable on this build (the runtime never emits it, see skill-guides/orchestration.md)
     // but stays handled since it's a valid FleetLaneProcessState member and the renderer must stay total.

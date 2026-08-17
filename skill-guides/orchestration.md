@@ -398,10 +398,15 @@ Wait for `tui-idle` before dispatching. Always pass `--timeout-ms`; real coding 
 Each lane:
 
 ```text
-<handle>  <taskId>  <dispatchId>  <lifecycle>  <quietMs>  <delivery>[ (<processState>)]
+<handle>  <taskId>  <dispatchId>  <lifecycle>  <quietMs>  <delivery>[:<deliveryEvidence>][ (<processState>)]
 ```
 
-- `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but nothing indicates it started a turn. Text mode renders this as `NOT_ACCEPTED`, deliberately loud. Treat it as "look now", not as "re-dispatch now": for a `worker-start` lane it is authoritative (the worker never reached `input_accepted`), but for a plain `dispatch --inject` there is no acceptance signal to read, so it is inferred from the terminal having produced no output since the dispatch. Confirm with `terminal read` before re-dispatching — a re-dispatch on a false positive duplicates work that is already running.
+- `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but nothing indicates it started a turn. Text mode renders this as `NOT_ACCEPTED`, deliberately loud. Treat it as "look now", not as "re-dispatch now", and **confirm with `terminal read` before re-dispatching** — a re-dispatch on a false positive duplicates work that is already running.
+- `deliveryEvidence` says which observation the verdict was read from, because the two are not equally strong. Text mode appends it to the verdict (`NOT_ACCEPTED:output`, `accepted:stage`).
+  - `worker_stage` — read from the worker-dispatch row a `worker-start` writes. A `not_accepted` here is authoritative: the start never got as far as handing the prompt over. An `accepted` here is weaker than it looks: `stage='input_accepted'` is written once the prompt write returns, so it means the runtime wrote the prompt, **not** that the agent began a turn. A composer that swallowed the submit still reports `accepted:stage` (#14525).
+  - `terminal_output` — no worker row exists, because `dispatch --inject` deliberately leaves the lane `unsupervised`. The verdict is inferred from the terminal having produced no output since `dispatched_at`. A worker that thinks for a while before printing anything reads as `NOT_ACCEPTED:output` while perfectly healthy.
+  - absent — nothing was available to read, and `delivery` is `unknown`.
+- Neither basis observes the agent itself. Both answer "did the sender believe it sent" or "did the pane make a noise"; a turn-start observation would answer the actual question for every lane shape, and does not exist on this path yet.
 - `processState` is `dead` or `unknown` — never `live` on this build. A connected PTY doesn't prove the agent inside it is alive, so the runtime won't claim liveness it hasn't verified. `unknown` is not an error.
 - Federated (remote) lanes report `unknown` for `processState` only — liveness facts are host-local, and only the runtime that owns the PTY has them. `delivery` still resolves normally: federated worker-start writes `stage='input_accepted'` to the local worker-dispatch row just like a local start, so these lanes report `accepted` once the remote worker is ready.
 - `check --wait` returns `fleet` on timeout too, so a timeout tells you why nobody spoke, not just that nobody did.

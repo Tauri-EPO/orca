@@ -30,6 +30,56 @@ function dispatch(overrides: Partial<FleetEchoDispatch> = {}): FleetEchoDispatch
 }
 
 describe('buildFleetEcho', () => {
+  it('names the worker row as the basis when a stage was read', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [dispatch()],
+        getWorkerStage: () => 'input_accepted'
+      })
+    )
+
+    expect(echo.lanes[0]).toMatchObject({
+      delivery: 'accepted',
+      deliveryEvidence: 'worker_stage'
+    })
+  })
+
+  it('names the terminal as the basis when no worker row exists', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [dispatch()],
+        getWorkerStage: () => null,
+        getTerminalSignal: () => ({ lastOutputAt: NOW - 120_000, processState: 'unknown' })
+      })
+    )
+
+    // Why: the lane is an unsupervised `dispatch --inject`, so this verdict is inferred, not read.
+    expect(echo.lanes[0]).toMatchObject({
+      delivery: 'not_accepted',
+      deliveryEvidence: 'terminal_output'
+    })
+  })
+
+  it('names no basis when nothing was available to read', () => {
+    const pendingEcho = buildFleetEcho(
+      'run_1',
+      makeSources({ listActiveDispatches: () => [dispatch({ status: 'pending' })] })
+    )
+    const noSignalEcho = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [dispatch()],
+        getWorkerStage: () => null,
+        getTerminalSignal: () => null
+      })
+    )
+
+    expect(pendingEcho.lanes[0]).toMatchObject({ delivery: 'unknown', deliveryEvidence: null })
+    expect(noSignalEcho.lanes[0]).toMatchObject({ delivery: 'unknown', deliveryEvidence: null })
+  })
+
   it('derives quiet time from the terminal last-output timestamp', () => {
     const echo = buildFleetEcho(
       'run_1',

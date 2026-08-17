@@ -2,6 +2,52 @@ import { describe, it, expect } from 'vitest'
 import { formatFleetEcho } from './orchestration-fleet-echo-format'
 
 describe('formatFleetEcho', () => {
+  it('says which observation each verdict was read from', () => {
+    const text = formatFleetEcho({
+      runId: 'run_1',
+      truncated: false,
+      lanes: [
+        {
+          handle: 'term_a',
+          taskId: 'task_1',
+          dispatchId: 'ctx_1',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          delivery: 'accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'live'
+        },
+        {
+          handle: 'term_b',
+          taskId: 'task_2',
+          dispatchId: 'ctx_2',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          delivery: 'not_accepted',
+          deliveryEvidence: 'terminal_output',
+          processState: 'live'
+        },
+        {
+          handle: 'term_c',
+          taskId: 'task_3',
+          dispatchId: 'ctx_3',
+          lifecycle: 'pending',
+          quietMs: null,
+          delivery: 'unknown',
+          deliveryEvidence: null,
+          processState: 'unknown'
+        }
+      ]
+    })
+
+    expect(text).toContain('accepted:stage')
+    // Why: the loud verdict must stay loud with the basis attached, not become a quieter string.
+    expect(text).toContain('NOT_ACCEPTED:output')
+    // Why: nothing was read, so there is no basis to name — 'unknown:' would imply one existed.
+    expect(text).toContain('unknown')
+    expect(text).not.toContain('unknown:')
+  })
+
   it('renders one line per lane with a header', () => {
     const text = formatFleetEcho({
       runId: 'run_1',
@@ -14,6 +60,7 @@ describe('formatFleetEcho', () => {
           lifecycle: 'dispatched',
           quietMs: 5_000,
           delivery: 'accepted',
+          deliveryEvidence: 'worker_stage',
           processState: 'live'
         }
       ]
@@ -37,6 +84,7 @@ describe('formatFleetEcho', () => {
           lifecycle: 'dispatched',
           quietMs: 182_000,
           delivery: 'not_accepted',
+          deliveryEvidence: 'worker_stage',
           processState: 'live'
         }
       ]
@@ -59,6 +107,7 @@ describe('formatFleetEcho', () => {
           lifecycle: 'dispatched',
           quietMs: null,
           delivery: 'unknown',
+          deliveryEvidence: null,
           processState: 'unknown'
         }
       ]
