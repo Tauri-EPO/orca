@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { ArrowRightLeft, GitBranch, ListChecks, Workflow, type LucideIcon } from 'lucide-react'
+import {
+  CircleCheckBig,
+  GitBranch,
+  ListChecks,
+  SignpostBig,
+  Workflow,
+  type LucideIcon
+} from 'lucide-react'
 import { ORCHESTRATION_SKILL_NAME } from '@/lib/agent-feature-install-commands'
 import type { SkillUsageExample } from '@/lib/skill-usage-example'
 import {
@@ -32,8 +39,8 @@ import { OrchestrationSkillPromptDialog } from './OrchestrationSkillPromptDialog
 import { translate } from '@/i18n/i18n'
 
 const EXAMPLE_ICONS = {
-  handoff: ArrowRightLeft,
-  'worktree-handoff': ArrowRightLeft,
+  'supervised-worker': CircleCheckBig,
+  'decision-gate': SignpostBig,
   'child-sequence': ListChecks,
   'child-parallel': GitBranch,
   'child-worktrees': Workflow
@@ -84,8 +91,8 @@ export function OrchestrationPane(): React.JSX.Element {
         'Agent Orchestration'
       )}
       description={translate(
-        'auto.components.settings.OrchestrationPane.2aacdb0517',
-        'Coordinate coding agents across handoffs, worktree handovers, and child-agent work.'
+        'auto.components.settings.OrchestrationPane.paneScope',
+        'Coordinate coding agents across supervised tasks, decision gates, and child-agent work.'
       )}
       keywords={getOrchestrationPaneSearchEntries()[0].keywords}
       className="space-y-5 py-2"
@@ -96,8 +103,8 @@ export function OrchestrationPane(): React.JSX.Element {
           'Orchestration skill'
         )}
         description={translate(
-          'auto.components.settings.OrchestrationPane.9bedd2a6e5',
-          'Enables agents to hand off context and coordinate work through Orca.'
+          'auto.components.settings.OrchestrationPane.skillScope',
+          'Enables agents to dispatch, supervise and coordinate other agents through Orca.'
         )}
         command={orchestrationInstallCommand}
         installedCommand={orchestrationUpdateCommand}

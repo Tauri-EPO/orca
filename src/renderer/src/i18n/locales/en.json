@@ -7238,7 +7238,9 @@
           "07641b9768": "Orchestration skill",
           "2aacdb0517": "Coordinate coding agents across handoffs, worktree handovers, and child-agent work.",
           "191ac34567": "Agent Orchestration",
-          "orchestrationScope": "Ask a coordinator agent to use orchestration to supervise child agents, coordinate task DAGs, and gate decisions — not to hand off ownership."
+          "orchestrationScope": "Ask a coordinator agent to use orchestration to supervise child agents, coordinate task DAGs, and gate decisions — not to hand off ownership.",
+          "paneScope": "Coordinate coding agents across supervised tasks, decision gates, and child-agent work.",
+          "skillScope": "Enables agents to dispatch, supervise and coordinate other agents through Orca."
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Enables agents to hand off context and coordinate work through Orca.",
