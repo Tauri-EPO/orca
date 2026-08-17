@@ -658,11 +658,15 @@ describe('OrchestrationDb', () => {
       const d = createDb()
       const task = d.createTask({ spec: 'work' })
       const ctx = d.createDispatchContext(task.id, 'term_a')
+      // Why: seed a heartbeat while the row is still dispatched, so the expected value is a
+      // timestamp rather than null — the initial state. Asserting null would also pass if
+      // completing the dispatch cleared the column, which is not what this guards.
+      d.recordHeartbeat(ctx.id, '2026-05-03T00:00:00.000Z')
       d.completeDispatch(ctx.id)
 
       d.recordHeartbeat(ctx.id, '2026-05-04T00:00:00.000Z')
       const after = d.getDispatchContext(task.id)
-      expect(after?.last_heartbeat_at).toBeNull()
+      expect(after?.last_heartbeat_at).toBe('2026-05-03T00:00:00.000Z')
     })
 
     it('getStaleDispatches returns only dispatched rows past the grace window', () => {
