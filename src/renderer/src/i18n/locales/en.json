@@ -7499,7 +7499,9 @@
           "191ac34567": "Agent Orchestration",
           "nestedWorkerDepthTitle": "Nested worker depth",
           "nestedWorkerDepthDescription": "How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch.",
-          "orchestrationScope": "Ask a coordinator agent to use orchestration to supervise child agents, coordinate task DAGs, and gate decisions — not to hand off ownership."
+          "orchestrationScope": "Ask a coordinator agent to use orchestration to supervise child agents, coordinate task DAGs, and gate decisions — not to hand off ownership.",
+          "paneScope": "Coordinate coding agents across supervised tasks, decision gates, and child-agent work.",
+          "skillScope": "Enables agents to dispatch, supervise and coordinate other agents through Orca."
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Enables agents to hand off context and coordinate work through Orca.",
