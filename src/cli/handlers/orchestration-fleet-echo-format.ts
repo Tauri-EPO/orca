@@ -29,16 +29,35 @@ function padColumn(value: string, width: number): string {
   return value.padEnd(width)
 }
 
+// Why: a healthy fleet says the same thing on every run-scoped response, and this block rides on
+// all of them — repeating an unchanged table costs a coordinator context on every call. One line
+// when there is nothing to act on makes the table itself the signal that something needs looking at.
+function isHealthy(lane: FleetLaneRow): boolean {
+  return lane.delivery !== 'not_accepted' && lane.processState !== 'dead'
+}
+
+function formatHealthySummary(fleet: FleetEcho, laneWord: string): string {
+  const quietest = fleet.lanes.reduce<number | null>(
+    (worst, lane) => (lane.quietMs !== null && lane.quietMs > (worst ?? -1) ? lane.quietMs : worst),
+    null
+  )
+  const truncatedNote = fleet.truncated ? ', more not shown' : ''
+  return `fleet ${fleet.runId}: ${fleet.lanes.length} ${laneWord}, none needing attention, quietest ${formatQuietMs(quietest)}${truncatedNote}`
+}
+
 export function formatFleetEcho(fleet: FleetEcho): string {
   if (fleet.lanes.length === 0) {
     return ''
+  }
+  const laneWord = fleet.lanes.length === 1 ? 'lane' : 'lanes'
+  if (fleet.lanes.every(isHealthy)) {
+    return formatHealthySummary(fleet, laneWord)
   }
 
   const rows = fleet.lanes.map((lane) => ({
     handle: lane.handle ?? '—',
     taskId: lane.taskId,
     dispatchId: lane.dispatchId,
-    lifecycle: lane.lifecycle,
     quietMs: formatQuietMs(lane.quietMs),
     delivery: formatDelivery(lane),
     // Why: a live PTY proves nothing about the agent inside it, so only dead/unknown earn a call-out.
@@ -51,18 +70,16 @@ export function formatFleetEcho(fleet: FleetEcho): string {
     handle: Math.max(...rows.map((row) => row.handle.length)),
     taskId: Math.max(...rows.map((row) => row.taskId.length)),
     dispatchId: Math.max(...rows.map((row) => row.dispatchId.length)),
-    lifecycle: Math.max(...rows.map((row) => row.lifecycle.length)),
     quietMs: Math.max(...rows.map((row) => row.quietMs.length))
   }
 
   const lines = rows.map(
     (row) =>
       `  ${padColumn(row.handle, widths.handle)}  ${padColumn(row.taskId, widths.taskId)}  ` +
-      `${padColumn(row.dispatchId, widths.dispatchId)}  ${padColumn(row.lifecycle, widths.lifecycle)}  ` +
+      `${padColumn(row.dispatchId, widths.dispatchId)}  ` +
       `${padColumn(row.quietMs, widths.quietMs)}  ${row.delivery}${row.processStateTag}`
   )
 
-  const laneWord = fleet.lanes.length === 1 ? 'lane' : 'lanes'
   const header = `fleet ${fleet.runId} (${fleet.lanes.length} ${laneWord}):`
   const footer = fleet.truncated ? ['  … more lanes not shown'] : []
 

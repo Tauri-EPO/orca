@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildFleetEcho,
   FLEET_ECHO_MAX_LANES,
+  FLEET_ECHO_SCAN_LIMIT,
   type FleetEchoDispatch,
   type FleetEchoSources
 } from './orchestration-fleet-echo'
@@ -30,6 +31,69 @@ function dispatch(overrides: Partial<FleetEchoDispatch> = {}): FleetEchoDispatch
 }
 
 describe('buildFleetEcho', () => {
+  it('ranks the lanes that need attention above the healthy ones before capping', () => {
+    // Why: the cap only costs anything when it hides the broken lane, so a lane created last must
+    // still be reported ahead of a dozen healthy ones created before it.
+    const healthy = Array.from({ length: FLEET_ECHO_MAX_LANES }, (_unused, index) =>
+      dispatch({ dispatchId: `ctx_ok_${index}`, assigneeHandle: `term_ok_${index}` })
+    )
+    const broken = dispatch({ dispatchId: 'ctx_broken', assigneeHandle: 'term_broken' })
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [...healthy, broken],
+        getWorkerStage: (dispatchId) => (dispatchId === 'ctx_broken' ? 'starting' : 'input_accepted'),
+        getTerminalSignal: () => ({ lastOutputAt: NOW - 1_000, processState: 'unknown' })
+      })
+    )
+
+    expect(echo.lanes[0].dispatchId).toBe('ctx_broken')
+    expect(echo.lanes).toHaveLength(FLEET_ECHO_MAX_LANES)
+    expect(echo.truncated).toBe(true)
+  })
+
+  it('ranks a read verdict above an inferred one, and a dead process above a quiet lane', () => {
+    const inferred = dispatch({ dispatchId: 'ctx_inferred', assigneeHandle: 'term_inferred' })
+    const read = dispatch({ dispatchId: 'ctx_read', assigneeHandle: 'term_read' })
+    const dead = dispatch({ dispatchId: 'ctx_dead', assigneeHandle: 'term_dead' })
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [inferred, dead, read],
+        getWorkerStage: (dispatchId) => (dispatchId === 'ctx_read' ? 'starting' : null),
+        getTerminalSignal: (handle) =>
+          handle === 'term_dead'
+            ? { lastOutputAt: NOW - 1_000, processState: 'dead' }
+            : { lastOutputAt: NOW - 120_000, processState: 'unknown' }
+      })
+    )
+
+    expect(echo.lanes.map((lane) => lane.dispatchId)).toEqual([
+      'ctx_read',
+      'ctx_inferred',
+      'ctx_dead'
+    ])
+  })
+
+  it('keeps the query order among lanes of equal severity', () => {
+    const first = dispatch({ dispatchId: 'ctx_1', assigneeHandle: 'term_1' })
+    const second = dispatch({ dispatchId: 'ctx_2', assigneeHandle: 'term_2' })
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [first, second],
+        getWorkerStage: () => 'input_accepted',
+        getTerminalSignal: () => ({ lastOutputAt: NOW - 5_000, processState: 'unknown' })
+      })
+    )
+
+    expect(echo.lanes.map((lane) => lane.dispatchId)).toEqual(['ctx_1', 'ctx_2'])
+  })
+
+  it('scans wider than it reports, so ranking sees lanes the cap would have dropped', () => {
+    expect(FLEET_ECHO_SCAN_LIMIT).toBeGreaterThan(FLEET_ECHO_MAX_LANES)
+  })
+
   it('names the worker row as the basis when a stage was read', () => {
     const echo = buildFleetEcho(
       'run_1',

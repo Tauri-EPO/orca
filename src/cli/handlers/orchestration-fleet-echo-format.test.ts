@@ -2,6 +2,96 @@ import { describe, it, expect } from 'vitest'
 import { formatFleetEcho } from './orchestration-fleet-echo-format'
 
 describe('formatFleetEcho', () => {
+  it('collapses a fleet with nothing to act on into one line', () => {
+    const text = formatFleetEcho({
+      runId: 'run_1',
+      truncated: false,
+      lanes: [
+        {
+          handle: 'term_a',
+          taskId: 'task_1',
+          dispatchId: 'ctx_1',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          delivery: 'accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'unknown'
+        },
+        {
+          handle: 'term_b',
+          taskId: 'task_2',
+          dispatchId: 'ctx_2',
+          lifecycle: 'dispatched',
+          quietMs: 62_000,
+          delivery: 'accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'unknown'
+        }
+      ]
+    })
+
+    expect(text).toBe('fleet run_1: 2 lanes, none needing attention, quietest 1m2s')
+    // Why: the table itself is the signal that something needs looking at, so a healthy fleet
+    // must not print one — otherwise every response repeats an unchanged block.
+    expect(text).not.toContain('ctx_1')
+  })
+
+  it('opens the full table as soon as one lane needs attention', () => {
+    const text = formatFleetEcho({
+      runId: 'run_1',
+      truncated: false,
+      lanes: [
+        {
+          handle: 'term_a',
+          taskId: 'task_1',
+          dispatchId: 'ctx_1',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          delivery: 'not_accepted',
+          deliveryEvidence: 'terminal_output',
+          processState: 'unknown'
+        },
+        {
+          handle: 'term_b',
+          taskId: 'task_2',
+          dispatchId: 'ctx_2',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          delivery: 'accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'unknown'
+        }
+      ]
+    })
+
+    // Why: the healthy lane still prints — the coordinator needs the roster to reason about
+    // the broken one, not just the broken row on its own.
+    expect(text).toContain('ctx_1')
+    expect(text).toContain('ctx_2')
+    expect(text).toContain('NOT_ACCEPTED:output')
+  })
+
+  it('does not print the lifecycle column, which delivery already implies', () => {
+    const text = formatFleetEcho({
+      runId: 'run_1',
+      truncated: false,
+      lanes: [
+        {
+          handle: 'term_a',
+          taskId: 'task_1',
+          dispatchId: 'ctx_1',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          delivery: 'not_accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'unknown'
+        }
+      ]
+    })
+
+    expect(text).not.toContain('dispatched')
+  })
+
   it('says which observation each verdict was read from', () => {
     const text = formatFleetEcho({
       runId: 'run_1',
@@ -59,7 +149,9 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: 5_000,
-          delivery: 'accepted',
+          // Why: a lane needing attention, because a fleet with nothing to act on renders the
+          // one-line summary instead — the table is what this case is about.
+          delivery: 'not_accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'live'
         }
@@ -69,7 +161,7 @@ describe('formatFleetEcho', () => {
     expect(text).toContain('fleet')
     expect(text).toContain('term_a')
     expect(text).toContain('5s')
-    expect(text).toContain('accepted')
+    expect(text).toContain('NOT_ACCEPTED')
   })
 
   it('shouts about a lane whose prompt was never accepted', () => {

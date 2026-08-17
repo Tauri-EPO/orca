@@ -46,6 +46,12 @@ export type FleetEchoSources = {
 
 export const FLEET_ECHO_MAX_LANES = 12
 
+// Why: severity is only knowable after each lane's runtime signals are resolved, so the cap cannot
+// be a SQL LIMIT — a `LIMIT 12` ordered by age drops the newest lanes, which is where a freshly
+// broken one lives. Read a wider bounded window, rank it, then cap. Past this window ranking
+// degrades to age again, which is disclosed in the guide rather than hidden.
+export const FLEET_ECHO_SCAN_LIMIT = 36
+
 // Why: the runtime marks a worker ready only once its prompt actually started a turn.
 const DELIVERED_STAGE = 'input_accepted'
 
@@ -86,6 +92,29 @@ function resolveDelivery(
   }
 }
 
+// Why: the cap only costs a coordinator something when it hides the lane that needs attention, so
+// rank before cutting: a verdict read from the worker row outranks one inferred from silence, a dead
+// process outranks a live-but-quiet one, and within a rank the longest silence goes first. What gets
+// truncated is then always the healthy tail.
+function laneSeverity(lane: FleetLaneRow): number {
+  if (lane.delivery === 'not_accepted') {
+    return lane.deliveryEvidence === 'worker_stage' ? 0 : 1
+  }
+  if (lane.processState === 'dead') {
+    return 2
+  }
+  return 3
+}
+
+function compareLanes(a: FleetLaneRow, b: FleetLaneRow): number {
+  const bySeverity = laneSeverity(a) - laneSeverity(b)
+  if (bySeverity !== 0) {
+    return bySeverity
+  }
+  // Why: a lane that has never spoken sorts after one that has, rather than reading as infinitely quiet.
+  return (b.quietMs ?? -1) - (a.quietMs ?? -1)
+}
+
 export function buildFleetEcho(
   runId: string,
   sources: FleetEchoSources,
@@ -96,7 +125,7 @@ export function buildFleetEcho(
   // Why: the cap is the response contract, not a default — a caller passing a larger limit must
   // not be able to widen a block that rides on every orchestration response.
   const effectiveLimit = Math.max(0, Math.min(limit, FLEET_ECHO_MAX_LANES))
-  const lanes = dispatches.slice(0, effectiveLimit).map((entry): FleetLaneRow => {
+  const ranked = dispatches.map((entry): FleetLaneRow => {
     const signal = entry.assigneeHandle ? sources.getTerminalSignal(entry.assigneeHandle) : null
     const lastOutputAt = signal?.lastOutputAt ?? null
     return {
@@ -116,5 +145,8 @@ export function buildFleetEcho(
       processState: signal?.processState ?? 'unknown'
     }
   })
-  return { runId, lanes, truncated: dispatches.length > lanes.length }
+  // Why: sort is stable in every engine this ships on, so equal-severity lanes keep the query's
+  // oldest-first order instead of shuffling between two otherwise identical responses.
+  const lanes = [...ranked].sort(compareLanes).slice(0, effectiveLimit)
+  return { runId, lanes, truncated: ranked.length > lanes.length }
 }

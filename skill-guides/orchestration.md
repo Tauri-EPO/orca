@@ -398,7 +398,13 @@ Wait for `tui-idle` before dispatching. Always pass `--timeout-ms`; real coding 
 Each lane:
 
 ```text
-<handle>  <taskId>  <dispatchId>  <lifecycle>  <quietMs>  <delivery>[:<deliveryEvidence>][ (<processState>)]
+fleet <runId>: <n> lanes, none needing attention, quietest <quietMs>
+```
+
+and, as soon as any lane needs attention, the full table instead — every lane, not just the degraded one:
+
+```text
+<handle>  <taskId>  <dispatchId>  <quietMs>  <delivery>[:<deliveryEvidence>][ (<processState>)]
 ```
 
 - `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but nothing indicates it started a turn. Text mode renders this as `NOT_ACCEPTED`, deliberately loud. Treat it as "look now", not as "re-dispatch now", and **confirm with `terminal read` before re-dispatching** — a re-dispatch on a false positive duplicates work that is already running.
@@ -410,6 +416,9 @@ Each lane:
 - `processState` is `dead` or `unknown` — never `live` on this build. A connected PTY doesn't prove the agent inside it is alive, so the runtime won't claim liveness it hasn't verified. `unknown` is not an error.
 - Federated (remote) lanes report `unknown` for `processState` only — liveness facts are host-local, and only the runtime that owns the PTY has them. `delivery` still resolves normally: federated worker-start writes `stage='input_accepted'` to the local worker-dispatch row just like a local start, so these lanes report `accepted` once the remote worker is ready.
 - `check --wait` returns `fleet` on timeout too, so a timeout tells you why nobody spoke, not just that nobody did.
+- **The block answers "which lane should I look at", not "is my fleet healthy right now".** It rides on responses, so you only see it when you ask. A coordinator parked in `check --wait` learns nothing until that call returns, which can be its whole timeout. This is a cheap read surface, not an alerting mechanism; do not build a supervision strategy that assumes the block will interrupt you.
+- Lanes are ordered by what needs attention first — a `not_accepted` read from the worker row, then one inferred from silence, then a dead process, then the longest silence — so the 12-lane cap truncates the healthy tail rather than a broken lane created late. Ranking sees a wider window than it reports; past that window it falls back to oldest-first, and `truncated: true` says only that more exist, not how many.
+- Under `--json` the block is always the full lane list; only text mode collapses a healthy fleet to one line.
 
 ## Example
 

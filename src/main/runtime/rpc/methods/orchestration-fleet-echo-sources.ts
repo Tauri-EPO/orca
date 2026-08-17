@@ -1,6 +1,6 @@
 import {
   buildFleetEcho,
-  FLEET_ECHO_MAX_LANES,
+  FLEET_ECHO_SCAN_LIMIT,
   type FleetEcho,
   type FleetEchoDispatch,
   type FleetEchoSources,
@@ -54,10 +54,12 @@ export function createFleetEchoSources(
   runId: string
 ): FleetEchoSources {
   return {
-    // Why: fetch one past the cap so the builder can tell a full page from a truncated one.
+    // Why: fetch one past the scan window so the builder can tell a full window from a truncated
+    // one. The window is wider than the lane cap because the builder ranks by severity before
+    // cutting, and severity needs the runtime signals a SQL LIMIT cannot see.
     listActiveDispatches: () =>
       deps
-        .listActiveDispatchesForRun(runId, FLEET_ECHO_MAX_LANES + 1)
+        .listActiveDispatchesForRun(runId, FLEET_ECHO_SCAN_LIMIT + 1)
         .map(toBuilderDispatch)
         .filter((entry): entry is FleetEchoDispatch => entry !== null),
     getWorkerStage: (dispatchId) => deps.getWorkerDispatchStage(dispatchId),
@@ -117,7 +119,7 @@ export async function attachFleetEcho<T extends object>(
   }
   try {
     const db = runtime.getOrchestrationDb()
-    const rows = db.listActiveDispatchesForRun(runId, FLEET_ECHO_MAX_LANES + 1)
+    const rows = db.listActiveDispatchesForRun(runId, FLEET_ECHO_SCAN_LIMIT + 1)
     const handles = rows
       .map((row) => row.assignee_handle)
       .filter((handle): handle is string => handle !== null)
