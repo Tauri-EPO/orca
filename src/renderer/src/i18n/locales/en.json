@@ -700,7 +700,11 @@
             "worktreeHandoffSummary": "Move work to an agent that is already running in a different branch.",
             "childSequenceSummary": "Use child agents one after another when each phase depends on the last.",
             "childParallelSummary": "Split non-overlapping investigation or implementation tasks across child agents.",
-            "prSplitSummary": "Give each child agent its own worktree so parallel implementation stays reviewable."
+            "prSplitSummary": "Give each child agent its own worktree so parallel implementation stays reviewable.",
+            "superviseTitle": "Supervise a worker to completion",
+            "superviseSummary": "Dispatch a task and wait for the worker to report done or escalate.",
+            "decisionGateTitle": "Pause for a decision before continuing",
+            "decisionGateSummary": "Let a child agent block on your answer instead of guessing."
           }
         }
       },
@@ -7494,7 +7498,8 @@
           "2aacdb0517": "Coordinate coding agents across handoffs, worktree handovers, and child-agent work.",
           "191ac34567": "Agent Orchestration",
           "nestedWorkerDepthTitle": "Nested worker depth",
-          "nestedWorkerDepthDescription": "How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch."
+          "nestedWorkerDepthDescription": "How many generations of dispatched workers may spawn their own workers. 1 keeps the agent tree flat: a coordinator dispatches workers, and those workers do not dispatch.",
+          "orchestrationScope": "Ask a coordinator agent to use orchestration to supervise child agents, coordinate task DAGs, and gate decisions — not to hand off ownership."
         },
         "OrchestrationSetupCard": {
           "e7d2a5146c": "Enables agents to hand off context and coordinate work through Orca.",

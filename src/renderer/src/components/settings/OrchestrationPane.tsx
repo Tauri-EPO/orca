@@ -208,8 +208,8 @@ export function OrchestrationPane({
           'How to use it'
         )}
         description={translate(
-          'auto.components.settings.OrchestrationPane.52e0634e2c',
-          'Ask a coordinator agent to use orchestration for handoffs, worktree handovers, and sequential or parallel child agents.'
+          'auto.components.settings.OrchestrationPane.orchestrationScope',
+          'Ask a coordinator agent to use orchestration to supervise child agents, coordinate task DAGs, and gate decisions — not to hand off ownership.'
         )}
         examples={getOrchestrationUsageExamples()}
         resolveIcon={resolveOrchestrationExampleIcon}
