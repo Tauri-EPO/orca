@@ -404,7 +404,7 @@ fleet <runId>: <n> lanes, none needing attention, quietest <quietMs>
 and, as soon as any lane needs attention, the full table instead — every lane, not just the degraded one:
 
 ```text
-<handle>  <taskId>  <dispatchId>  <quietMs>  <delivery>[:<deliveryEvidence>][ (<processState>)]
+<handle>  <taskId>  <dispatchId>  <quietMs>  hb:<heartbeatAge>  <delivery>[:<deliveryEvidence>][ (<processState>)]
 ```
 
 - `delivery: not_accepted` is the signal that matters: the prompt was handed to the terminal but nothing indicates it started a turn. Text mode renders this as `NOT_ACCEPTED`, deliberately loud. Treat it as "look now", not as "re-dispatch now", and **confirm with `terminal read` before re-dispatching** — a re-dispatch on a false positive duplicates work that is already running.
@@ -419,6 +419,8 @@ and, as soon as any lane needs attention, the full table instead — every lane,
 - **The block answers "which lane should I look at", not "is my fleet healthy right now".** It rides on responses, so you only see it when you ask. A coordinator parked in `check --wait` learns nothing until that call returns, which can be its whole timeout. This is a cheap read surface, not an alerting mechanism; do not build a supervision strategy that assumes the block will interrupt you.
 - Lanes are ordered by what needs attention first — a `not_accepted` read from the worker row, then one inferred from silence, then a dead process, then the longest silence — so the 12-lane cap truncates the healthy tail rather than a broken lane created late. Ranking sees a wider window than it reports; past that window it falls back to oldest-first, and `truncated: true` says only that more exist, not how many.
 - Under `--json` the block is always the full lane list; only text mode collapses a healthy fleet to one line.
+- `heartbeatAgeMs` (`hb:` in text mode) is how long ago the lane's last accepted heartbeat landed; `hb:—` means it has never sent one, which is normal for a lane that has not started work or is parked inside `ask`/`check --wait`. Read it as freshness, not as a verdict: a worker mid-way through a long tool call sends no heartbeat and is perfectly healthy.
+- **Heartbeats no longer wake you.** A valid `heartbeat` is recorded as lane state and kept out of the idle push, so it never starts a coordinator turn to say nothing changed. It stays unread, so an explicit `orca orchestration check` still lists it and `check --wait --types heartbeat` still resolves on one. A heartbeat the runtime *rejected* still pushes — that one is a report that a lane's lifecycle claim was refused, not a liveness ping. Every other type — `worker_done`, `escalation`, `question`, `decision_gate` — pushes exactly as before.
 
 ## Example
 

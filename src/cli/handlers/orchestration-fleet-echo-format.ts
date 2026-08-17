@@ -1,11 +1,11 @@
 import type { FleetEcho, FleetLaneRow } from '../../shared/orchestration-fleet-echo'
 
 // Why: a coordinator scans this at a glance; "12s"/"6m41s" reads faster than raw ms.
-function formatQuietMs(quietMs: number | null): string {
-  if (quietMs === null) {
+function formatDurationMs(durationMs: number | null): string {
+  if (durationMs === null) {
     return '—'
   }
-  const totalSeconds = Math.floor(quietMs / 1000)
+  const totalSeconds = Math.floor(durationMs / 1000)
   if (totalSeconds < 60) {
     return `${totalSeconds}s`
   }
@@ -42,7 +42,7 @@ function formatHealthySummary(fleet: FleetEcho, laneWord: string): string {
     null
   )
   const truncatedNote = fleet.truncated ? ', more not shown' : ''
-  return `fleet ${fleet.runId}: ${fleet.lanes.length} ${laneWord}, none needing attention, quietest ${formatQuietMs(quietest)}${truncatedNote}`
+  return `fleet ${fleet.runId}: ${fleet.lanes.length} ${laneWord}, none needing attention, quietest ${formatDurationMs(quietest)}${truncatedNote}`
 }
 
 export function formatFleetEcho(fleet: FleetEcho): string {
@@ -58,7 +58,10 @@ export function formatFleetEcho(fleet: FleetEcho): string {
     handle: lane.handle ?? '—',
     taskId: lane.taskId,
     dispatchId: lane.dispatchId,
-    quietMs: formatQuietMs(lane.quietMs),
+    quietMs: formatDurationMs(lane.quietMs),
+    // Why: labelled rather than a bare second duration — two unlabelled ages side by side
+    // read as one range. "hb:—" says the lane has never heartbeated, not that it is silent.
+    heartbeat: `hb:${formatDurationMs(lane.heartbeatAgeMs)}`,
     delivery: formatDelivery(lane),
     // Why: a live PTY proves nothing about the agent inside it, so only dead/unknown earn a call-out.
     // 'live' is unreachable on this build (the runtime never emits it, see skill-guides/orchestration.md)
@@ -70,14 +73,16 @@ export function formatFleetEcho(fleet: FleetEcho): string {
     handle: Math.max(...rows.map((row) => row.handle.length)),
     taskId: Math.max(...rows.map((row) => row.taskId.length)),
     dispatchId: Math.max(...rows.map((row) => row.dispatchId.length)),
-    quietMs: Math.max(...rows.map((row) => row.quietMs.length))
+    quietMs: Math.max(...rows.map((row) => row.quietMs.length)),
+    heartbeat: Math.max(...rows.map((row) => row.heartbeat.length))
   }
 
   const lines = rows.map(
     (row) =>
       `  ${padColumn(row.handle, widths.handle)}  ${padColumn(row.taskId, widths.taskId)}  ` +
       `${padColumn(row.dispatchId, widths.dispatchId)}  ` +
-      `${padColumn(row.quietMs, widths.quietMs)}  ${row.delivery}${row.processStateTag}`
+      `${padColumn(row.quietMs, widths.quietMs)}  ${padColumn(row.heartbeat, widths.heartbeat)}  ` +
+      `${row.delivery}${row.processStateTag}`
   )
 
   const header = `fleet ${fleet.runId} (${fleet.lanes.length} ${laneWord}):`

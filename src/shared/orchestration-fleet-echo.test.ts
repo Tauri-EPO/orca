@@ -26,6 +26,7 @@ function dispatch(overrides: Partial<FleetEchoDispatch> = {}): FleetEchoDispatch
     assigneeHandle: 'term_a',
     status: 'dispatched',
     dispatchedAt: NOW - 60_000,
+    lastHeartbeatAt: null,
     ...overrides
   }
 }
@@ -142,6 +143,44 @@ describe('buildFleetEcho', () => {
 
     expect(pendingEcho.lanes[0]).toMatchObject({ delivery: 'unknown', deliveryEvidence: null })
     expect(noSignalEcho.lanes[0]).toMatchObject({ delivery: 'unknown', deliveryEvidence: null })
+  })
+
+  it('reports heartbeat age from the last accepted heartbeat', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({
+        listActiveDispatches: () => [dispatch({ lastHeartbeatAt: NOW - 240_000 })]
+      })
+    )
+
+    expect(echo.lanes[0].heartbeatAgeMs).toBe(240_000)
+  })
+
+  it('reports a null heartbeat age for a lane that has never heartbeated', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({ listActiveDispatches: () => [dispatch({ lastHeartbeatAt: null })] })
+    )
+
+    expect(echo.lanes[0].heartbeatAgeMs).toBeNull()
+  })
+
+  it('keeps an epoch-zero heartbeat as a real age rather than reading it as absent', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({ listActiveDispatches: () => [dispatch({ lastHeartbeatAt: 0 })] })
+    )
+
+    expect(echo.lanes[0].heartbeatAgeMs).toBe(NOW)
+  })
+
+  it('clamps a heartbeat stamped in the future to zero rather than a negative age', () => {
+    const echo = buildFleetEcho(
+      'run_1',
+      makeSources({ listActiveDispatches: () => [dispatch({ lastHeartbeatAt: NOW + 30_000 })] })
+    )
+
+    expect(echo.lanes[0].heartbeatAgeMs).toBe(0)
   })
 
   it('derives quiet time from the terminal last-output timestamp', () => {

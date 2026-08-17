@@ -2,6 +2,43 @@ import { describe, it, expect } from 'vitest'
 import { formatFleetEcho } from './orchestration-fleet-echo-format'
 
 describe('formatFleetEcho', () => {
+  it('labels the heartbeat age and marks a lane that has never heartbeated', () => {
+    const text = formatFleetEcho({
+      runId: 'run_1',
+      truncated: false,
+      lanes: [
+        {
+          handle: 'term_a',
+          taskId: 'task_1',
+          dispatchId: 'ctx_1',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          heartbeatAgeMs: 240_000,
+          // Why: a lane needing attention, so the table renders — a healthy fleet collapses
+          // to the one-line summary, which carries no per-lane heartbeat.
+          delivery: 'not_accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'unknown'
+        },
+        {
+          handle: 'term_b',
+          taskId: 'task_2',
+          dispatchId: 'ctx_2',
+          lifecycle: 'dispatched',
+          quietMs: 5_000,
+          heartbeatAgeMs: null,
+          delivery: 'accepted',
+          deliveryEvidence: 'worker_stage',
+          processState: 'unknown'
+        }
+      ]
+    })
+
+    // Why: the label is what keeps two adjacent durations from reading as one range.
+    expect(text).toContain('hb:4m0s')
+    expect(text).toContain('hb:—')
+  })
+
   it('collapses a fleet with nothing to act on into one line', () => {
     const text = formatFleetEcho({
       runId: 'run_1',
@@ -13,6 +50,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           delivery: 'accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'unknown'
@@ -23,6 +61,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_2',
           lifecycle: 'dispatched',
           quietMs: 62_000,
+          heartbeatAgeMs: null,
           delivery: 'accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'unknown'
@@ -47,6 +86,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           delivery: 'not_accepted',
           deliveryEvidence: 'terminal_output',
           processState: 'unknown'
@@ -57,6 +97,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_2',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           delivery: 'accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'unknown'
@@ -82,6 +123,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           delivery: 'not_accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'unknown'
@@ -103,6 +145,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           delivery: 'accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'live'
@@ -113,6 +156,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_2',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           delivery: 'not_accepted',
           deliveryEvidence: 'terminal_output',
           processState: 'live'
@@ -123,6 +167,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_3',
           lifecycle: 'pending',
           quietMs: null,
+          heartbeatAgeMs: null,
           delivery: 'unknown',
           deliveryEvidence: null,
           processState: 'unknown'
@@ -149,6 +194,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: 5_000,
+          heartbeatAgeMs: null,
           // Why: a lane needing attention, because a fleet with nothing to act on renders the
           // one-line summary instead — the table is what this case is about.
           delivery: 'not_accepted',
@@ -175,6 +221,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_3',
           lifecycle: 'dispatched',
           quietMs: 182_000,
+          heartbeatAgeMs: null,
           delivery: 'not_accepted',
           deliveryEvidence: 'worker_stage',
           processState: 'live'
@@ -198,6 +245,7 @@ describe('formatFleetEcho', () => {
           dispatchId: 'ctx_1',
           lifecycle: 'dispatched',
           quietMs: null,
+          heartbeatAgeMs: null,
           delivery: 'unknown',
           deliveryEvidence: null,
           processState: 'unknown'

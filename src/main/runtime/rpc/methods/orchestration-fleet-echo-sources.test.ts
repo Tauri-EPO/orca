@@ -38,7 +38,8 @@ function makeDeps(overrides: Partial<FleetEchoRuntimeDeps> = {}): FleetEchoRunti
         task_id: 'task_1',
         assignee_handle: 'term_a',
         status: 'dispatched',
-        dispatched_at: '2026-08-16 00:00:00'
+        dispatched_at: '2026-08-16 00:00:00',
+        last_heartbeat_at: null
       }
     ],
     getWorkerDispatchStage: () => 'input_accepted',
@@ -58,9 +59,34 @@ describe('createFleetEchoSources', () => {
         taskId: 'task_1',
         assigneeHandle: 'term_a',
         status: 'dispatched',
-        dispatchedAt: Date.parse('2026-08-16T00:00:00.000Z')
+        dispatchedAt: Date.parse('2026-08-16T00:00:00.000Z'),
+        lastHeartbeatAt: null
       }
     ])
+  })
+
+  it('normalizes a heartbeat timestamp through the same UTC path as dispatched_at', () => {
+    const sources = createFleetEchoSources(
+      makeDeps({
+        listActiveDispatchesForRun: () => [
+          {
+            id: 'ctx_1',
+            task_id: 'task_1',
+            assignee_handle: 'term_a',
+            status: 'dispatched',
+            dispatched_at: '2026-08-16 00:00:00',
+            // Why: SQLite writes timezone-less UTC; read as local time this lane would report an
+            // age wrong by the host offset, which is the #8452 failure applied to a second column.
+            last_heartbeat_at: '2026-08-16 00:04:00'
+          }
+        ]
+      }),
+      'run_1'
+    )
+
+    expect(sources.listActiveDispatches()[0].lastHeartbeatAt).toBe(
+      Date.parse('2026-08-16T00:04:00.000Z')
+    )
   })
 
   it('drops rows whose status is not an active lifecycle', () => {
@@ -72,7 +98,8 @@ describe('createFleetEchoSources', () => {
             task_id: 'task_1',
             assignee_handle: 'term_a',
             status: 'completed',
-            dispatched_at: null
+            dispatched_at: null,
+            last_heartbeat_at: null
           }
         ]
       }),
@@ -91,7 +118,8 @@ describe('createFleetEchoSources', () => {
             task_id: 'task_1',
             assignee_handle: 'term_a',
             status: 'dispatched',
-            dispatched_at: 'not a timestamp'
+            dispatched_at: 'not a timestamp',
+            last_heartbeat_at: null
           }
         ]
       }),
@@ -116,7 +144,8 @@ describe('createFleetEchoSources', () => {
               task_id: 'task_1',
               assignee_handle: 'term_a',
               status: 'dispatched',
-              dispatched_at: '2026-08-16 00:00:00'
+              dispatched_at: '2026-08-16 00:00:00',
+              last_heartbeat_at: null
             }
           ]
         }),
@@ -143,6 +172,7 @@ type FakeDispatchRow = {
   assignee_handle: string | null
   status: string
   dispatched_at: string | null
+  last_heartbeat_at: string | null
 }
 
 function makeRuntime(
@@ -159,7 +189,8 @@ function makeRuntime(
       task_id: 'task_1',
       assignee_handle: 'term_a',
       status: 'dispatched',
-      dispatched_at: '2026-08-16 00:00:00'
+      dispatched_at: '2026-08-16 00:00:00',
+      last_heartbeat_at: null
     }
   ]
   return {

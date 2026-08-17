@@ -16,12 +16,13 @@ type ActiveDispatchRow = {
   assignee_handle: string | null
   status: string
   dispatched_at: string | null
+  last_heartbeat_at: string | null
 }
 
 // Why: SQLite's datetime('now') writes timezone-less UTC ("YYYY-MM-DD HH:MM:SS"); V8's Date.parse
 // reads that as local time, so normalize through exposeUtcTimestamp before parsing (#8452). An
 // unparseable value must degrade to null instead of poisoning comparisons with NaN.
-function parseDispatchedAt(value: string | null): number | null {
+function parseSqliteTimestamp(value: string | null): number | null {
   if (!value) {
     return null
   }
@@ -45,7 +46,8 @@ function toBuilderDispatch(row: ActiveDispatchRow): FleetEchoDispatch | null {
     taskId: row.task_id,
     assigneeHandle: row.assignee_handle,
     status: row.status,
-    dispatchedAt: parseDispatchedAt(row.dispatched_at)
+    dispatchedAt: parseSqliteTimestamp(row.dispatched_at),
+    lastHeartbeatAt: parseSqliteTimestamp(row.last_heartbeat_at)
   }
 }
 

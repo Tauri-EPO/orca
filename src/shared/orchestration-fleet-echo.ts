@@ -12,6 +12,8 @@ export type FleetLaneRow = {
   dispatchId: string
   lifecycle: FleetLaneLifecycle
   quietMs: number | null
+  /** Age of the lane's last accepted heartbeat; null when it has never sent one. */
+  heartbeatAgeMs: number | null
   delivery: FleetLaneDelivery
   deliveryEvidence: FleetLaneDeliveryEvidence | null
   processState: FleetLaneProcessState
@@ -30,6 +32,8 @@ export type FleetEchoDispatch = {
   status: FleetLaneLifecycle
   /** Epoch ms the prompt was handed to the terminal; null when never dispatched. */
   dispatchedAt: number | null
+  /** Epoch ms of the last accepted heartbeat; null when the lane has never sent one. */
+  lastHeartbeatAt: number | null
 }
 
 export type FleetEchoTerminalSignal = {
@@ -136,6 +140,10 @@ export function buildFleetEcho(
       // Why: a backwards clock must read as "just spoke", never as a negative age.
       // Null-check rather than truthiness so an epoch-zero timestamp means the same thing here as it does to resolveDelivery below.
       quietMs: lastOutputAt === null ? null : Math.max(0, now - lastOutputAt),
+      // Why: heartbeat freshness is state the coordinator reads here instead of being woken to
+      // hear it (#14910). Same clock guard as quietMs — never negative, and epoch-zero is a real age.
+      heartbeatAgeMs:
+        entry.lastHeartbeatAt === null ? null : Math.max(0, now - entry.lastHeartbeatAt),
       ...resolveDelivery(
         entry.status,
         sources.getWorkerStage(entry.dispatchId),
