@@ -1244,6 +1244,13 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
     const from = showPreamble
       ? await resolveCoordinatorTerminalHandle(flags, cwd, client)
       : undefined
+    // Why: this command reaches a Run through the task it was handed, not through the caller, so the
+    // runtime only attaches the fleet block once it can prove the caller owns that same Run. Without
+    // the handle the gate returns null and the block silently never appears. Skipped when the block
+    // was suppressed, so --no-fleet does not pay for a resolve it will not use.
+    const callerTerminalHandle = flags.has('no-fleet')
+      ? undefined
+      : (from ?? (await resolveCoordinatorTerminalHandle(flags, cwd, client)))
     const result = await client.call<{
       dispatch: { id: string; task_id: string; status: string } | null
       preamble?: string
@@ -1252,6 +1259,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       task: getRequiredStringFlag(flags, 'task'),
       preamble: showPreamble,
       from,
+      callerTerminalHandle,
       devMode: isDevCliInvocation(),
       ...(flags.has('no-fleet') ? { fleet: false } : {})
     })

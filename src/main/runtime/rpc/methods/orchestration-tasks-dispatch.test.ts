@@ -10,9 +10,10 @@ describe('orchestration RPC methods', () => {
   let db: OrchestrationDb
   let runtime: OrcaRuntimeService
   let ctx: RpcContext
+  let activeRunId: string | undefined
 
   function setup(withBoundRun = true): void {
-    ;({ db, runtime, ctx } = h.setup(withBoundRun))
+    ;({ db, runtime, ctx, activeRunId } = h.setup(withBoundRun))
   }
 
   afterEach(() => {
@@ -513,9 +514,11 @@ describe('orchestration RPC methods', () => {
     function setupRunWithActiveDispatch() {
       setup()
       vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
-      const task = db.createTask({ spec: 'fleet echo work' })
+      // Why: createTask defaults an omitted runId to the legacy Run, which the bound-Run query then
+      // excludes — the lane assertions have to exercise the caller's own Run to mean anything.
+      const task = db.createTask({ runId: activeRunId as string, spec: 'fleet echo work' })
       const dispatch = db.createDispatchContext(task.id, 'term_worker')
-      return { run: { id: task.run_id }, task, dispatch }
+      return { run: { id: activeRunId as string }, task, dispatch }
     }
 
     it.each([

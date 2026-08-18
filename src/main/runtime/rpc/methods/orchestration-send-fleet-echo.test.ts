@@ -70,8 +70,7 @@ describe('orchestration RPC methods', () => {
       vi.spyOn(runtime, 'listTerminalSummariesForHandles').mockResolvedValue([])
       const original = db.insertMessage({ from: 'term_worker', to: 'term_coord', subject: 'status' })
 
-      // Why: replying only needs a message id, so without this gate any caller holding one from
-      // another Run would receive that Run's lane roster.
+      // Why: a message id alone must not hand out another Run's lane roster.
       const result = (await call('orchestration.reply', {
         id: original.id,
         body: 'ack',
