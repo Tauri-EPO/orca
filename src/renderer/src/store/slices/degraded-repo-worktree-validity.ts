@@ -8,7 +8,7 @@ type WorktreeValidityCatalog = {
   repos: readonly Pick<Repo, 'id'>[]
   worktreesByRepo: Readonly<Record<string, readonly Pick<Worktree, 'id'>[]>>
   detectedWorktreesByRepo?: Readonly<
-    Record<string, Pick<DetectedWorktreeListResult, 'authoritative'> | undefined>
+    Record<string, Pick<DetectedWorktreeListResult, 'authoritative' | 'worktrees'> | undefined>
   >
 }
 
@@ -61,8 +61,23 @@ export function buildValidWorktreeIdsForSessionHydration(
       .map(([repoId]) => repoId)
   )
 
+  // Why: `worktreesByRepo` carries only the rows the sidebar shows, so a detected-but-hidden
+  // worktree (agent-scratch, un-imported external) looks identical to a deleted one here. Dropping
+  // it discards its persisted panes, and the live PTYs the daemon kept across the restart come back
+  // with no leaf — invisible in every surface while `terminal list` still reports them running.
+  // Detection still proves existence, so a genuinely removed worktree is unaffected.
+  const detectedWorktreeIds = new Set(
+    Object.values(detectedWorktreesByRepo).flatMap((detected) =>
+      (detected?.worktrees ?? []).map((worktree) => worktree.id)
+    )
+  )
+
   for (const worktreeId of persistedWorktreeIds) {
     if (validWorktreeIds.has(worktreeId) || parseWorkspaceKey(worktreeId)?.type === 'folder') {
+      continue
+    }
+    if (detectedWorktreeIds.has(worktreeId)) {
+      validWorktreeIds.add(worktreeId)
       continue
     }
     const repoId = getRepoIdFromWorktreeId(worktreeId)
