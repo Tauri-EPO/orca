@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const callMock = vi.fn()
 const getTerminalHandleMock = vi.hoisted(() => vi.fn())
 const originalTerminalHandle = process.env.ORCA_TERMINAL_HANDLE
+const originalPaneKey = process.env.ORCA_PANE_KEY
 
 // Why: isolate the handler's flag-to-param mapping; printResult only writes output.
 vi.mock('../format', () => ({ printResult: vi.fn() }))
@@ -16,6 +17,11 @@ afterEach(() => {
     delete process.env.ORCA_TERMINAL_HANDLE
   } else {
     process.env.ORCA_TERMINAL_HANDLE = originalTerminalHandle
+  }
+  if (originalPaneKey === undefined) {
+    delete process.env.ORCA_PANE_KEY
+  } else {
+    process.env.ORCA_PANE_KEY = originalPaneKey
   }
 })
 
@@ -68,6 +74,7 @@ describe('orchestration fleet echo caller handle', () => {
     )
 
     // Why: --no-fleet must not pay for a resolve whose only consumer was the block it turned off.
+    expect(getTerminalHandleMock).not.toHaveBeenCalled()
     expect(callMock).toHaveBeenCalledWith('orchestration.dispatchShow', {
       task: 'task_1',
       preamble: undefined,
