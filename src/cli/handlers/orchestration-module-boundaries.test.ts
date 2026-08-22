@@ -116,6 +116,10 @@ describe('extracted orchestration dispatch handlers', () => {
   beforeEach(() => {
     call.mockReset()
     vi.mocked(printResult).mockReset()
+    // Why: dispatch-show now reads caller identity from the ambient pane env, so a real handle
+    // left in place would make these boundary assertions depend on where the suite runs.
+    delete process.env.ORCA_TERMINAL_HANDLE
+    delete process.env.ORCA_PANE_KEY
   })
 
   it('allows a dry run without a recipient and returns only its preamble', async () => {
@@ -164,6 +168,7 @@ describe('extracted orchestration dispatch handlers', () => {
       task: 'task_1',
       preamble: undefined,
       from: undefined,
+      callerTerminalHandle: undefined,
       devMode: false
     })
     expect(renderedValue({ dispatch: null })).toBe('No dispatch context found.')

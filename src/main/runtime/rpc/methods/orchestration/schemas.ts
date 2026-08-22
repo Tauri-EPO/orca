@@ -234,6 +234,8 @@ export const DispatchShowParams = z.object({
   task: OptionalString,
   preamble: OptionalBoolean,
   from: OptionalString,
+  // Why: accepted now so the caller identity survives the wire; Run scoping keyed to it lands separately (#14898).
+  callerTerminalHandle: OptionalString,
   devMode: OptionalBoolean
 })
 
