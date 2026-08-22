@@ -36,7 +36,7 @@ export const ORCHESTRATION_WORKER_COMMAND_SPECS: CommandSpec[] = [
       'Remote current and new-child are invalid; discover an exact remote selector or use new-top-level.',
       '--retry-of links the replacement attempt but does not inherit placement; repeat the intended --on/worktree and --agent/terminal choices.',
       'The call exits 0 only for ready. Failed or outcome_unknown exits 1 and JSON includes stage/failedStage, setup, effects, residualResources, and recovery commands when needed.',
-      'A failed start that left its own agent terminal adds recoveryNote and recoveryCommands routed through the Dispatch, never a direct terminal close; outcome_unknown gets retry guidance instead because the start may have succeeded.'
+      'A failed start that left its own agent terminal adds recoveryNote and recoveryCommands routed through the Dispatch, never a direct terminal close, and adds neither when the receipt already carries host-supplied commands; outcome_unknown gets retry guidance instead because the start may have succeeded.'
     ]
   },
   {

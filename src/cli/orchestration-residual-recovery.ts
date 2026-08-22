@@ -1,3 +1,5 @@
+import { quoteCliCommandArgument } from './shell-command-quote'
+
 type ResidualResource = {
   kind?: unknown
   role?: unknown
@@ -42,9 +44,14 @@ export function workerStartRecovery(receipt: unknown): WorkerStartRecovery | und
     return undefined
   }
   const dispatchId = value.dispatchId
-  if (typeof dispatchId !== 'string' || dispatchId.length === 0) {
+  if (
+    typeof dispatchId !== 'string' ||
+    dispatchId.length === 0 ||
+    !isPrintableOnOneLine(dispatchId)
+  ) {
     return undefined
   }
+  const dispatchArgument = quoteCliCommandArgument(dispatchId)
   if (!Array.isArray(value.residualResources)) {
     return undefined
   }
@@ -57,13 +64,25 @@ export function workerStartRecovery(receipt: unknown): WorkerStartRecovery | und
     const name = typeof server.name === 'string' ? server.name : 'the connected server'
     return {
       note: `The residual terminal belongs to worker server ${name}, not this Orca server; a local terminal close would target the wrong host. Inspect the Dispatch and clean up on that server:`,
-      commands: [`orca orchestration worker-show --dispatch ${dispatchId} --json`]
+      commands: [`orca orchestration worker-show --dispatch ${dispatchArgument} --json`]
     }
   }
   return {
     note: 'Reclaim the terminal this failed start created through its Dispatch, so Orca preserves the output and closes only what it can prove this Dispatch owns:',
-    commands: [`orca orchestration worker-release --dispatch ${dispatchId} --json`]
+    commands: [`orca orchestration worker-release --dispatch ${dispatchArgument} --json`]
   }
+}
+
+// Why: these commands are printed for a human to copy into a shell. Quoting makes a metacharacter
+// inert, but nothing makes a line break safe to paste on one line, so such an id earns no command.
+function isPrintableOnOneLine(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f) {
+      return false
+    }
+  }
+  return true
 }
 
 function isOwnedAgentTerminal(resource: unknown): boolean {

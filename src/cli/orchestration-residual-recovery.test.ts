@@ -101,6 +101,30 @@ describe('workerStartRecovery', () => {
     ])
   })
 
+  it('keeps a shell metacharacter in a dispatch id inside one argument', () => {
+    const recovery = workerStartRecovery(failedReceipt({ dispatchId: 'ctx_1; printf INJECTED' }))
+
+    const command = recovery?.commands[0] ?? ''
+    expect(command).not.toContain('--dispatch ctx_1; printf')
+    expect(command).toMatch(
+      /^orca orchestration worker-release --dispatch ("ctx_1; printf INJECTED"|'ctx_1; printf INJECTED') --json$/
+    )
+  })
+
+  it('offers nothing for a dispatch id carrying a line break', () => {
+    expect(
+      workerStartRecovery(failedReceipt({ dispatchId: 'ctx_1\nprintf INJECTED' }))
+    ).toBeUndefined()
+    expect(
+      workerStartRecovery(
+        failedReceipt({
+          dispatchId: 'ctx_1\r\nprintf INJECTED',
+          server: { name: 'windows' }
+        })
+      )
+    ).toBeUndefined()
+  })
+
   it('defers to a host that shipped its own commands', () => {
     expect(
       workerStartRecovery(
