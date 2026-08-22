@@ -164,7 +164,7 @@ describe('orchestration worker-start CLI contract', () => {
     expect(process.exitCode).toBe(1)
   })
 
-  it('attaches a reclaim command to every residual terminal a failed start left behind', async () => {
+  it('routes a failed start reclaim through the Dispatch and never a bare terminal close', async () => {
     callMock.mockResolvedValue({
       result: {
         taskId: 'task_1',
@@ -175,7 +175,42 @@ describe('orchestration worker-start CLI contract', () => {
         effects: [],
         residualResources: [
           { kind: 'worktree', action: 'created_child', id: 'repo::child' },
-          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_worker' }
+          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_worker' },
+          { kind: 'terminal', role: 'setup', action: 'created', id: 'term_setup' },
+          { kind: 'terminal', role: 'configured_tab', action: 'created', id: 'term_tab' }
+        ]
+      }
+    })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['agent', 'codex'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    const call = vi.mocked(printResult).mock.calls[0]
+    const printed = call?.[0] as { result: { recoveryCommands?: string[]; recoveryNote?: string } }
+    expect(printed.result.recoveryCommands).toEqual([
+      'orca orchestration worker-release --dispatch ctx_1 --json'
+    ])
+    const formatter = call?.[2] as (value: unknown) => string
+    const text = formatter(printed.result)
+    expect(text).toContain('  orca orchestration worker-release --dispatch ctx_1 --json')
+    expect(text).not.toContain('terminal close')
+    expect(text).not.toContain('term_setup')
+  })
+
+  it('offers no reclaim while the start outcome is unknown', async () => {
+    callMock.mockResolvedValue({
+      result: {
+        taskId: 'task_1',
+        dispatchId: 'ctx_1',
+        state: 'outcome_unknown',
+        effects: [],
+        residualResources: [
+          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_maybe' }
         ]
       }
     })
@@ -191,13 +226,8 @@ describe('orchestration worker-start CLI contract', () => {
     const printed = vi.mocked(printResult).mock.calls[0]?.[0] as {
       result: { recoveryCommands?: string[] }
     }
-    expect(printed.result.recoveryCommands).toEqual([
-      'orca terminal close --terminal term_worker --json'
-    ])
-    const formatter = vi.mocked(printResult).mock.calls[0]?.[2] as (value: unknown) => string
-    expect(formatter(printed.result)).toContain(
-      '  orca terminal close --terminal term_worker --json'
-    )
+    expect(printed.result.recoveryCommands).toBeUndefined()
+    expect(process.exitCode).toBe(1)
   })
 
   it('never offers to reclaim the live terminal of a ready worker', async () => {
@@ -225,16 +255,52 @@ describe('orchestration worker-start CLI contract', () => {
     expect(printed.result.recoveryCommands).toBeUndefined()
   })
 
-  it('marks reclaim as conditional while the start outcome is unknown', async () => {
+  it('keeps reclaim of a connected-server worker on that server', async () => {
+    callMock.mockResolvedValue({
+      result: {
+        taskId: 'task_1',
+        dispatchId: 'ctx_remote',
+        state: 'failed',
+        failedStage: 'remote_attach',
+        server: { environmentId: 'env_win', name: 'windows' },
+        effects: [],
+        residualResources: [
+          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_remote' }
+        ]
+      }
+    })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['on', 'windows'],
+        ['agent', 'codex'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    const call = vi.mocked(printResult).mock.calls[0]
+    const printed = call?.[0] as { result: { recoveryCommands?: string[] } }
+    expect(printed.result.recoveryCommands).toEqual([
+      'orca orchestration worker-show --dispatch ctx_remote --json'
+    ])
+    const formatter = call?.[2] as (value: unknown) => string
+    const text = formatter(printed.result)
+    expect(text).toContain('worker server windows')
+    expect(text).not.toContain('term_remote')
+  })
+
+  it('leaves a receipt that already carries host commands untouched', async () => {
     callMock.mockResolvedValue({
       result: {
         taskId: 'task_1',
         dispatchId: 'ctx_1',
-        state: 'outcome_unknown',
+        state: 'failed',
         effects: [],
         residualResources: [
-          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_maybe' }
-        ]
+          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_worker' }
+        ],
+        nextCommands: ['orca orchestration worker-abandon --dispatch ctx_1 --json']
       }
     })
 
@@ -246,10 +312,13 @@ describe('orchestration worker-start CLI contract', () => {
       ])
     )
 
-    const call = vi.mocked(printResult).mock.calls[0]
-    const printed = call?.[0] as { result: unknown }
-    const formatter = call?.[2] as (value: unknown) => string
-    expect(formatter(printed.result)).toContain('If you abandon this attempt instead of retrying')
+    const printed = vi.mocked(printResult).mock.calls[0]?.[0] as {
+      result: { recoveryCommands?: string[]; nextCommands?: string[] }
+    }
+    expect(printed.result.recoveryCommands).toBeUndefined()
+    expect(printed.result.nextCommands).toEqual([
+      'orca orchestration worker-abandon --dispatch ctx_1 --json'
+    ])
   })
 
   it('prints a reveal warning for a live background worker', async () => {

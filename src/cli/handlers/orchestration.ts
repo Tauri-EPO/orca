@@ -33,7 +33,7 @@ import {
   type OrchestrationMessageSummary as MessageSummary
 } from '../../shared/orchestration-check-output'
 import { orchestrationMutationRecoveryError } from '../orchestration-mutation-recovery'
-import { residualResourceRecoveryCommands } from '../orchestration-residual-recovery'
+import { workerStartRecovery } from '../orchestration-residual-recovery'
 
 // Why: 15 s is well under Claude Code's ~2 min Bash-tool silence budget while keeping log volume low. See design doc §3.4.
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 15_000
@@ -432,9 +432,12 @@ type WorkerStartReceipt = {
   failedStage?: string
   lastError?: string
   warning?: string
+  server?: { environmentId?: string; name?: string }
   effects: unknown[]
   residualResources: unknown[]
+  nextCommands?: string[]
   recoveryCommands?: string[]
+  recoveryNote?: string
 }
 
 function formatWorkerStartReceipt(worker: WorkerStartReceipt): string {
@@ -444,13 +447,8 @@ function formatWorkerStartReceipt(worker: WorkerStartReceipt): string {
   } else if (worker.warning) {
     lines.push(`Warning: ${worker.warning}`)
   }
-  if (worker.recoveryCommands && worker.recoveryCommands.length > 0) {
-    lines.push(
-      worker.state === 'outcome_unknown'
-        ? 'If you abandon this attempt instead of retrying, reclaim what it left behind:'
-        : 'Reclaim what this failed start left behind:',
-      ...worker.recoveryCommands.map((command) => `  ${command}`)
-    )
+  if (worker.recoveryNote && worker.recoveryCommands?.length) {
+    lines.push(worker.recoveryNote, ...worker.recoveryCommands.map((command) => `  ${command}`))
   }
   return lines.join('\n')
 }
@@ -950,17 +948,20 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         devMode: isDevCliInvocation()
       }
     )
-    // Why: a ready worker's created terminal is the live worker, not residue to reclaim.
-    const recoveryCommands =
-      result.result.state === 'ready'
-        ? []
-        : residualResourceRecoveryCommands(result.result.residualResources)
     if (result.result.state !== 'ready') {
       process.exitCode = 1
     }
+    const recovery = workerStartRecovery(result.result)
     printResult(
-      recoveryCommands.length > 0
-        ? { ...result, result: { ...result.result, recoveryCommands } }
+      recovery
+        ? {
+            ...result,
+            result: {
+              ...result.result,
+              recoveryNote: recovery.note,
+              recoveryCommands: recovery.commands
+            }
+          }
         : result,
       json,
       formatWorkerStartReceipt
