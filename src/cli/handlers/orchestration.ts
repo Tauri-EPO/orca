@@ -33,6 +33,7 @@ import {
   type OrchestrationMessageSummary as MessageSummary
 } from '../../shared/orchestration-check-output'
 import { orchestrationMutationRecoveryError } from '../orchestration-mutation-recovery'
+import { residualResourceRecoveryCommands } from '../orchestration-residual-recovery'
 
 // Why: 15 s is well under Claude Code's ~2 min Bash-tool silence budget while keeping log volume low. See design doc §3.4.
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 15_000
@@ -421,6 +422,37 @@ function callMutation<TResult>(
   return result.catch((error) => {
     throw orchestrationMutationRecoveryError(error)
   })
+}
+
+type WorkerStartReceipt = {
+  runId: string
+  taskId: string
+  dispatchId: string
+  state: string
+  failedStage?: string
+  lastError?: string
+  warning?: string
+  effects: unknown[]
+  residualResources: unknown[]
+  recoveryCommands?: string[]
+}
+
+function formatWorkerStartReceipt(worker: WorkerStartReceipt): string {
+  const lines = [`Worker ${worker.dispatchId} [${worker.state}] for ${worker.taskId}`]
+  if (worker.lastError) {
+    lines.push(`${worker.failedStage ?? 'start'}: ${worker.lastError}`)
+  } else if (worker.warning) {
+    lines.push(`Warning: ${worker.warning}`)
+  }
+  if (worker.recoveryCommands && worker.recoveryCommands.length > 0) {
+    lines.push(
+      worker.state === 'outcome_unknown'
+        ? 'If you abandon this attempt instead of retrying, reclaim what it left behind:'
+        : 'Reclaim what this failed start left behind:',
+      ...worker.recoveryCommands.map((command) => `  ${command}`)
+    )
+  }
+  return lines.join('\n')
 }
 
 type LegacyWorkerReadResult = {
@@ -893,46 +925,46 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
         )
       }
     }
-    const result = await callMutation<{
-      runId: string
-      taskId: string
-      dispatchId: string
-      state: string
-      failedStage?: string
-      lastError?: string
-      warning?: string
-      effects: unknown[]
-      residualResources: unknown[]
-    }>(client, flags, 'orchestration.workerStart', {
-      task: getRequiredStringFlag(flags, 'task'),
-      on: getOptionalStringFlag(flags, 'on'),
-      worktree: getOptionalStringFlag(flags, 'worktree'),
-      name: getOptionalStringFlag(flags, 'name'),
-      repo: getOptionalStringFlag(flags, 'repo'),
-      baseBranch: getOptionalStringFlag(flags, 'base-branch'),
-      displayName: getOptionalStringFlag(flags, 'display-name'),
-      comment: getOptionalStringFlag(flags, 'comment'),
-      setup: getOptionalStringFlag(flags, 'setup'),
-      agent: getOptionalStringFlag(flags, 'agent'),
-      model,
-      effort,
-      terminal: getOptionalStringFlag(flags, 'terminal'),
-      retryOf: getOptionalStringFlag(flags, 'retry-of'),
-      timeoutMs: getOptionalPositiveIntegerValueFlag(flags, 'timeout-ms'),
-      run: getOptionalStringFlag(flags, 'run'),
-      from: await resolveCoordinatorTerminalHandle(flags, cwd, client),
-      devMode: isDevCliInvocation()
-    })
+    const result = await callMutation<WorkerStartReceipt>(
+      client,
+      flags,
+      'orchestration.workerStart',
+      {
+        task: getRequiredStringFlag(flags, 'task'),
+        on: getOptionalStringFlag(flags, 'on'),
+        worktree: getOptionalStringFlag(flags, 'worktree'),
+        name: getOptionalStringFlag(flags, 'name'),
+        repo: getOptionalStringFlag(flags, 'repo'),
+        baseBranch: getOptionalStringFlag(flags, 'base-branch'),
+        displayName: getOptionalStringFlag(flags, 'display-name'),
+        comment: getOptionalStringFlag(flags, 'comment'),
+        setup: getOptionalStringFlag(flags, 'setup'),
+        agent: getOptionalStringFlag(flags, 'agent'),
+        model,
+        effort,
+        terminal: getOptionalStringFlag(flags, 'terminal'),
+        retryOf: getOptionalStringFlag(flags, 'retry-of'),
+        timeoutMs: getOptionalPositiveIntegerValueFlag(flags, 'timeout-ms'),
+        run: getOptionalStringFlag(flags, 'run'),
+        from: await resolveCoordinatorTerminalHandle(flags, cwd, client),
+        devMode: isDevCliInvocation()
+      }
+    )
+    // Why: a ready worker's created terminal is the live worker, not residue to reclaim.
+    const recoveryCommands =
+      result.result.state === 'ready'
+        ? []
+        : residualResourceRecoveryCommands(result.result.residualResources)
     if (result.result.state !== 'ready') {
       process.exitCode = 1
     }
-    printResult(result, json, (worker) => {
-      const base = `Worker ${worker.dispatchId} [${worker.state}] for ${worker.taskId}`
-      if (worker.lastError) {
-        return `${base}\n${worker.failedStage ?? 'start'}: ${worker.lastError}`
-      }
-      return worker.warning ? `${base}\nWarning: ${worker.warning}` : base
-    })
+    printResult(
+      recoveryCommands.length > 0
+        ? { ...result, result: { ...result.result, recoveryCommands } }
+        : result,
+      json,
+      formatWorkerStartReceipt
+    )
   },
 
   'orchestration worker-show': async ({ flags, client, json }) => {

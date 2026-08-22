@@ -1,3 +1,4 @@
+import { residualResourceRecoveryCommands } from './orchestration-residual-recovery'
 import { RuntimeClientError } from './runtime-client'
 
 export function orchestrationMutationRecoveryError(error: unknown): unknown {
@@ -9,6 +10,7 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
   if (typeof requestId !== 'string' || requestId.length === 0) {
     return error
   }
+  const recoveryCommands = residualResourceRecoveryCommands(data?.residualResources)
   const message = [
     stripUnsafeRetryAdvice(error.message, requestId),
     'The orchestration mutation may already have taken effect; do not assume it failed.',
@@ -16,7 +18,11 @@ export function orchestrationMutationRecoveryError(error: unknown): unknown {
     typeof data?.failedStage === 'string' ? `Failed stage: ${data.failedStage}.` : undefined,
     Array.isArray(data?.residualResources)
       ? `Residual resources: ${JSON.stringify(data.residualResources)}.`
-      : undefined
+      : undefined,
+    recoveryCommands.length > 0
+      ? 'Once the retry settles and the residual resource is confirmed unused, reclaim it with:'
+      : undefined,
+    ...recoveryCommands.map((command) => `  ${command}`)
   ].filter((line): line is string => line !== undefined)
   return new RuntimeClientError(error.code, message.join('\n'), error.data)
 }

@@ -212,6 +212,8 @@ Setup normally starts alongside the agent. Only a repository explicitly configur
 
 Read the returned receipt before continuing: `ready` plus setup `running` is normal for start-immediately, while wait-for-setup returns setup `succeeded` before accepting task input. A failed or unknown start exits nonzero; inspect its `stage`, `effects`, and `residualResources` instead of guessing or automatically retrying. A wait-for-setup timeout can honestly leave setup `running`, which is not proof of failure.
 
+A nonzero start that left a resource behind also returns `recoveryCommands`, one exact command per reclaimable residual resource. A residual `kind: "terminal"` was never released to a live Dispatch, so it is cleared with `orca terminal close --terminal <handle> --json`. Run those commands for a `failed` start once you decide not to retry that attempt. For `outcome_unknown` the start may still have succeeded: retry with `--retry-request` first and reclaim only what the retry leaves unused.
+
 To run the worker on another connected Orca server, add `--on <saved-environment>`. The Run and Tasks remain authoritative on the current server; later commands route by Dispatch ID, so never repeat `--on`:
 
 ```bash
@@ -243,7 +245,7 @@ After processing each accepted `worker_done`, choose the terminal's next owner b
 
 Run `worker-release` after both succeeded and failed `worker_done` reports unless the user explicitly asked to keep that worker live. Release is post-completion cleanup, not cancellation: Orca first preserves inspectable output, then closes only the exact agent terminal owned by that settled Dispatch. Reused or pre-existing terminals, setup terminals, coordinators, active workers, user-taken-over terminals, and identities Orca cannot prove are retained. If the user explicitly asks to keep the live terminal for debugging, record that exception with `orca orchestration worker-retain --dispatch <dispatch_id> --json` instead of silently skipping cleanup. When the user is finished, the same Dispatch can be passed to `worker-release`, which clears the requested retention and releases the terminal.
 
-Do not release a worker because of a timeout, TUI idle state, heartbeat, status, question, escalation, or rejected/stale `worker_done`. If release returns `release_pending` or `release_unknown`, do not substitute `terminal close`; follow the exact recovery action in the receipt. A replayed Delivery may repeat `worker-release` safely.
+Do not release a worker because of a timeout, TUI idle state, heartbeat, status, question, escalation, or rejected/stale `worker_done`. If release returns `release_pending` or `release_unknown`, do not substitute `terminal close` for the settled Dispatch's release; follow the exact recovery action in the receipt. That prohibition covers only a terminal a settled Dispatch owns, not a residual terminal a failed `worker-start` left unowned. A replayed Delivery may repeat `worker-release` safely.
 
 Workers report exactly once using the IDs and capability injected by Orca; they do not supply Run/server/terminal identity:
 

@@ -164,6 +164,94 @@ describe('orchestration worker-start CLI contract', () => {
     expect(process.exitCode).toBe(1)
   })
 
+  it('attaches a reclaim command to every residual terminal a failed start left behind', async () => {
+    callMock.mockResolvedValue({
+      result: {
+        taskId: 'task_1',
+        dispatchId: 'ctx_1',
+        state: 'failed',
+        failedStage: 'dispatch_input',
+        lastError: 'agent_prompt_stalled',
+        effects: [],
+        residualResources: [
+          { kind: 'worktree', action: 'created_child', id: 'repo::child' },
+          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_worker' }
+        ]
+      }
+    })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['agent', 'codex'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    const printed = vi.mocked(printResult).mock.calls[0]?.[0] as {
+      result: { recoveryCommands?: string[] }
+    }
+    expect(printed.result.recoveryCommands).toEqual([
+      'orca terminal close --terminal term_worker --json'
+    ])
+    const formatter = vi.mocked(printResult).mock.calls[0]?.[2] as (value: unknown) => string
+    expect(formatter(printed.result)).toContain(
+      '  orca terminal close --terminal term_worker --json'
+    )
+  })
+
+  it('never offers to reclaim the live terminal of a ready worker', async () => {
+    callMock.mockResolvedValue({
+      result: {
+        taskId: 'task_1',
+        dispatchId: 'ctx_1',
+        state: 'ready',
+        effects: [],
+        residualResources: [{ kind: 'terminal', role: 'agent', action: 'created', id: 'term_live' }]
+      }
+    })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['agent', 'codex'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    const printed = vi.mocked(printResult).mock.calls[0]?.[0] as {
+      result: { recoveryCommands?: string[] }
+    }
+    expect(printed.result.recoveryCommands).toBeUndefined()
+  })
+
+  it('marks reclaim as conditional while the start outcome is unknown', async () => {
+    callMock.mockResolvedValue({
+      result: {
+        taskId: 'task_1',
+        dispatchId: 'ctx_1',
+        state: 'outcome_unknown',
+        effects: [],
+        residualResources: [
+          { kind: 'terminal', role: 'agent', action: 'created', id: 'term_maybe' }
+        ]
+      }
+    })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['agent', 'codex'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    const call = vi.mocked(printResult).mock.calls[0]
+    const printed = call?.[0] as { result: unknown }
+    const formatter = call?.[2] as (value: unknown) => string
+    expect(formatter(printed.result)).toContain('If you abandon this attempt instead of retrying')
+  })
+
   it('prints a reveal warning for a live background worker', async () => {
     callMock.mockResolvedValue({
       result: {
