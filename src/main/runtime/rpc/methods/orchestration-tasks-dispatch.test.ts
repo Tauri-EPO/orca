@@ -501,6 +501,19 @@ describe('orchestration RPC methods', () => {
       expect(result.preamble).toContain('build feature')
     })
 
+    it('accepts callerTerminalHandle without changing the result', async () => {
+      setup()
+      const task = db.createTask({ spec: 'work' })
+      db.createDispatchContext(task.id, 'term_a')
+
+      const result = (await call('orchestration.dispatchShow', {
+        task: task.id,
+        callerTerminalHandle: 'term_coord'
+      })) as { dispatch: { task_id: string } | null }
+
+      expect(result.dispatch?.task_id).toBe(task.id)
+    })
+
     it('--preamble throws for unknown task', async () => {
       setup()
       await expect(

@@ -348,6 +348,28 @@ async function resolveCoordinatorTerminalHandle(
   })
 }
 
+// Why: identity is advisory on reads until the runtime scopes on it, so a read that used to
+// succeed must never start failing. Deliberately skips the focus-based active-terminal fallback:
+// a remote or headless caller would otherwise be attributed to whichever pane happens to be focused.
+async function resolveOptionalCallerTerminalHandle(
+  flags: Map<string, string | boolean>,
+  client: Parameters<CommandHandler>[0]['client']
+): Promise<string | undefined> {
+  const explicit = getOptionalStringFlag(flags, 'from')
+  if (explicit) {
+    return explicit
+  }
+  const envHandle = process.env.ORCA_TERMINAL_HANDLE
+  try {
+    if (envHandle && envHandle.length > 0 && (await isLiveTerminalHandle(envHandle, client))) {
+      return envHandle
+    }
+    return await resolveOrchestrationPaneTerminalHandle(client, { optional: true })
+  } catch {
+    return undefined
+  }
+}
+
 async function resolveImplicitOrchestrationSender(
   flags: Map<string, string | boolean>,
   cwd: string,
@@ -1219,6 +1241,9 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
     const from = showPreamble
       ? await resolveCoordinatorTerminalHandle(flags, cwd, client)
       : undefined
+    // Why: carries caller identity for the Run scoping in #14898; best-effort because the runtime still
+    // ignores it, so requiring it now would break headless reads for no functional gain.
+    const callerTerminalHandle = from ?? (await resolveOptionalCallerTerminalHandle(flags, client))
     const result = await client.call<{
       dispatch: { id: string; task_id: string; status: string } | null
       preamble?: string
@@ -1226,6 +1251,7 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       task: getRequiredStringFlag(flags, 'task'),
       preamble: showPreamble,
       from,
+      callerTerminalHandle,
       devMode: isDevCliInvocation()
     })
     printResult(result, json, (r) => {
