@@ -6,7 +6,50 @@ import type {
   WorkerTerminalListState
 } from '../../worker-terminal-ownership'
 import { isEquivalentPaneKey } from '../pane-key-match'
+import { exposeUtcTimestamp } from '../utc-timestamp'
 import type { OrchestrationDb } from '../orchestration-db'
+
+/** Whether this host can state how long ago the Dispatch last reported. */
+export type DispatchHeartbeatState =
+  /** No heartbeat has ever been recorded for this Dispatch. */
+  | 'never'
+  /** `heartbeatAgeSeconds` is a trustworthy age. */
+  | 'recorded'
+  /** A stamp exists but no age can be derived from it — corrupt, or written by a clock ahead of this one. */
+  | 'unreadable'
+
+// Why: `last_heartbeat_at` is arrival time on the Run home, never the worker's own clock — see the
+// contract on recordHeartbeat — so age is a single-clock subtraction and needs no skew correction.
+// julianday() still returns NULL for a stamp it cannot parse, and the result is deliberately left
+// signed: a stamp in this host's future is nonsense, and clamping it to 0 would read as "just
+// reported" instead of surfacing the anomaly.
+const HEARTBEAT_AGE_SECONDS_SQL = `CAST(
+  ROUND((julianday('now') - julianday(d.last_heartbeat_at)) * 86400.0) AS INTEGER
+)`
+
+function deriveHeartbeatFreshness(row: {
+  last_heartbeat_at: string | null
+  heartbeat_age_seconds: number | null
+}): {
+  lastHeartbeatReceivedAt: string | null
+  heartbeatAgeSeconds: number | null
+  heartbeatState: DispatchHeartbeatState
+} {
+  if (row.last_heartbeat_at === null) {
+    return { lastHeartbeatReceivedAt: null, heartbeatAgeSeconds: null, heartbeatState: 'never' }
+  }
+  // Why: the stamp is still published unusable so an operator can see what is actually stored;
+  // only the state says whether the age may be thresholded on.
+  const lastHeartbeatReceivedAt = exposeUtcTimestamp(row.last_heartbeat_at)
+  if (row.heartbeat_age_seconds === null || row.heartbeat_age_seconds < 0) {
+    return { lastHeartbeatReceivedAt, heartbeatAgeSeconds: null, heartbeatState: 'unreadable' }
+  }
+  return {
+    lastHeartbeatReceivedAt,
+    heartbeatAgeSeconds: row.heartbeat_age_seconds,
+    heartbeatState: 'recorded'
+  }
+}
 
 // Real user input relinquishes orchestration ownership durably; programmatic prompt delivery,
 // query auto-replies, resize, and output never reach this path.
@@ -93,6 +136,9 @@ export function listWorkerTerminalResources(
   dispatchStatus: DispatchStatus
   agentTerminalHandle: string | null
   terminalState: WorkerTerminalListState | null
+  lastHeartbeatReceivedAt: string | null
+  heartbeatAgeSeconds: number | null
+  heartbeatState: DispatchHeartbeatState
   resource: WorkerTerminalResourceRow | null
 }[] {
   const rows = this.db
@@ -100,7 +146,9 @@ export function listWorkerTerminalResources(
       `SELECT d.id AS dispatch_id,
               COALESCE(w.state, 'unsupervised') AS worker_state,
               COALESCE(w.agent_terminal_handle, d.assignee_handle) AS agent_terminal_handle,
-              d.task_id, d.run_id, d.status AS dispatch_status
+              d.task_id, d.run_id, d.status AS dispatch_status,
+              d.last_heartbeat_at,
+              ${HEARTBEAT_AGE_SECONDS_SQL} AS heartbeat_age_seconds
          FROM dispatch_contexts d
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
         ${params.runId ? 'WHERE d.run_id = ?' : ''}
@@ -113,6 +161,8 @@ export function listWorkerTerminalResources(
     task_id: string
     run_id: string
     dispatch_status: DispatchStatus
+    last_heartbeat_at: string | null
+    heartbeat_age_seconds: number | null
   }[]
   const resources = this.db
     .prepare(
@@ -138,6 +188,7 @@ export function listWorkerTerminalResources(
         agentTerminalHandle: row.agent_terminal_handle,
         resource
       }),
+      ...deriveHeartbeatFreshness(row),
       resource
     }
   })
