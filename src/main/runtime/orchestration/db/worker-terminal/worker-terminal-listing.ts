@@ -20,16 +20,14 @@ export type DispatchHeartbeatState =
 
 // Why: `last_heartbeat_at` is arrival time on the Run home, never the worker's own clock — see the
 // contract on recordHeartbeat — so age is a single-clock subtraction and needs no skew correction.
-// julianday() still returns NULL for a stamp it cannot parse, and the result is deliberately left
-// signed: a stamp in this host's future is nonsense, and clamping it to 0 would read as "just
-// reported" instead of surfacing the anomaly.
-const HEARTBEAT_AGE_SECONDS_SQL = `CAST(
-  ROUND((julianday('now') - julianday(d.last_heartbeat_at)) * 86400.0) AS INTEGER
-)`
+// The reference instant is bound rather than `julianday('now')`: `now` is only stable within one
+// sqlite3_step(), so a multi-row fleet listing would age each lane against its own clock reading.
+// Left unrounded on purpose — the caller must test the sign before rounding.
+const HEARTBEAT_AGE_SECONDS_SQL = `(julianday(?) - julianday(d.last_heartbeat_at)) * 86400.0`
 
 function deriveHeartbeatFreshness(row: {
   last_heartbeat_at: string | null
-  heartbeat_age_seconds: number | null
+  heartbeat_age_seconds_exact: number | null
 }): {
   lastHeartbeatReceivedAt: string | null
   heartbeatAgeSeconds: number | null
@@ -41,12 +39,16 @@ function deriveHeartbeatFreshness(row: {
   // Why: the stamp is still published unusable so an operator can see what is actually stored;
   // only the state says whether the age may be thresholded on.
   const lastHeartbeatReceivedAt = exposeUtcTimestamp(row.last_heartbeat_at)
-  if (row.heartbeat_age_seconds === null || row.heartbeat_age_seconds < 0) {
+  const exactAgeSeconds = row.heartbeat_age_seconds_exact
+  // Why: the sign test must come before rounding. Rounding first turns any stamp under half a second
+  // into this host's future into 0, publishing the most reassuring possible answer — "just reported" —
+  // for a lane whose clock evidence is broken and which may in fact be hung.
+  if (exactAgeSeconds === null || exactAgeSeconds < 0) {
     return { lastHeartbeatReceivedAt, heartbeatAgeSeconds: null, heartbeatState: 'unreadable' }
   }
   return {
     lastHeartbeatReceivedAt,
-    heartbeatAgeSeconds: row.heartbeat_age_seconds,
+    heartbeatAgeSeconds: Math.round(exactAgeSeconds),
     heartbeatState: 'recorded'
   }
 }
@@ -148,13 +150,15 @@ export function listWorkerTerminalResources(
               COALESCE(w.agent_terminal_handle, d.assignee_handle) AS agent_terminal_handle,
               d.task_id, d.run_id, d.status AS dispatch_status,
               d.last_heartbeat_at,
-              ${HEARTBEAT_AGE_SECONDS_SQL} AS heartbeat_age_seconds
+              ${HEARTBEAT_AGE_SECONDS_SQL} AS heartbeat_age_seconds_exact
          FROM dispatch_contexts d
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
         ${params.runId ? 'WHERE d.run_id = ?' : ''}
         ORDER BY COALESCE(w.created_at, d.created_at) ASC`
     )
-    .all(...(params.runId ? [params.runId] : [])) as {
+    // Why: one reference instant for the whole listing, so two lanes that reported together cannot
+    // read as different ages just because SQLite re-read its clock between rows.
+    .all(new Date().toISOString(), ...(params.runId ? [params.runId] : [])) as {
     dispatch_id: string
     worker_state: WorkerDispatchListState
     agent_terminal_handle: string | null
@@ -162,7 +166,7 @@ export function listWorkerTerminalResources(
     run_id: string
     dispatch_status: DispatchStatus
     last_heartbeat_at: string | null
-    heartbeat_age_seconds: number | null
+    heartbeat_age_seconds_exact: number | null
   }[]
   const resources = this.db
     .prepare(

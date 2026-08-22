@@ -114,7 +114,7 @@ export const ORCHESTRATION_WORKER_COMMAND_SPECS: CommandSpec[] = [
     notes: [
       'Terminal state is process accounting and is reported separately from Task status; a completed Task can still own a live terminal.',
       'Context-only Dispatches created by orchestration dispatch are included as unsupervised with terminal state retained.',
-      'Reports heartbeat freshness per Dispatch: heartbeatState is never, recorded, or unreadable; lastHeartbeatReceivedAt and heartbeatAgeSeconds are measured on the Run home when the heartbeat arrived, so a federated worker clock cannot skew them.'
+      'Reports heartbeat freshness per Dispatch: heartbeatState is never, recorded, or unreadable; lastHeartbeatReceivedAt is when the Run home recorded the heartbeat and heartbeatAgeSeconds is how long ago that was as of this call, both read from the Run home clock, so a federated worker clock cannot skew them. Every row in one listing is aged against the same instant.'
     ]
   }
 ]
