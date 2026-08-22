@@ -87,11 +87,8 @@ describe('worker-list heartbeat freshness', () => {
     })
   })
 
-  it('ages every lane in one listing against the same instant', () => {
-    const database = new OrchestrationDb(':memory:')
-    db = database
-    const stamp = '2026-08-22 11:59:30'
-    for (let index = 0; index < 25; index += 1) {
+  function seedLanes(database: OrchestrationDb, count: number, stamp: string): void {
+    for (let index = 0; index < count; index += 1) {
       const task = database.createTask({ spec: `lane ${index}` })
       const dispatch = database.createDispatchContext(
         task.id,
@@ -108,11 +105,53 @@ describe('worker-list heartbeat freshness', () => {
         .prepare('UPDATE dispatch_contexts SET last_heartbeat_at = ? WHERE id = ?')
         .run(stamp, dispatch.id)
     }
+  }
+
+  // Scope: this asserts the ages come out equal, nothing more. It does NOT isolate the per-row clock
+  // read it was once named after — 25 in-memory rows are read well inside one rounding bucket, so a
+  // per-row julianday('now') would agree here too. The statement-level test below is the real guard.
+  it('returns equal ages for lanes that reported at the same instant', () => {
+    const database = new OrchestrationDb(':memory:')
+    db = database
+    seedLanes(database, 25, '2026-08-22 11:59:30')
 
     const ages = new Set(
       database.listWorkerTerminalResources().map((row) => row.heartbeatAgeSeconds)
     )
 
     expect(ages).toEqual(new Set([30]))
+  })
+
+  // Why assert the statement rather than the output: `now` is stable only within one sqlite3_step(),
+  // so a per-row read makes ages incomparable by an amount no assertion on wall-clock results can pin
+  // down deterministically. What IS deterministic is the seam — one bound reference for the whole
+  // statement — and this fails the moment anyone puts the clock read back inside the row.
+  it('ages the whole listing from one bound reference, never a per-row clock read', () => {
+    const database = new OrchestrationDb(':memory:')
+    db = database
+    seedLanes(database, 3, '2026-08-22 11:59:30')
+    const raw = (database as unknown as { db: { prepare: (sql: string) => unknown } }).db
+    const prepared: { sql: string; args: unknown[] }[] = []
+    const prepare = raw.prepare.bind(raw)
+    vi.spyOn(raw, 'prepare').mockImplementation((sql: string) => {
+      const statement = prepare(sql) as { all: (...args: unknown[]) => unknown }
+      const all = statement.all.bind(statement)
+      return {
+        ...statement,
+        all: (...args: unknown[]) => {
+          prepared.push({ sql, args })
+          return all(...args)
+        }
+      }
+    })
+
+    const lanes = database.listWorkerTerminalResources()
+
+    expect(lanes).toHaveLength(3)
+    const listing = prepared.find((call) => call.sql.includes('heartbeat_age_seconds_exact'))
+    expect(listing?.sql).toContain('julianday(?)')
+    expect(listing?.sql).not.toContain("julianday('now')")
+    // One reference instant bound for the statement, regardless of how many rows it returns.
+    expect(listing?.args).toEqual(['2026-08-22T12:00:00.000Z'])
   })
 })
