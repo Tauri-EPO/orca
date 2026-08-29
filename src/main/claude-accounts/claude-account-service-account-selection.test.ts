@@ -188,6 +188,11 @@ describe('ClaudeAccountService credential capture', () => {
     expect(rateLimits.refreshForClaudeAccountChange).toHaveBeenCalledWith('account-1', {
       runtime: 'host'
     })
+    // Why: mobile/CLI-initiated switches have no renderer-side refetch, so the write must broadcast.
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ activeClaudeManagedAccountId: 'account-2' }),
+      { notifyListeners: true }
+    )
   })
 
   it('restores the previous selection when a Claude account switch fails', async () => {
