@@ -631,15 +631,6 @@ describe('OrchestrationDb', () => {
       expect(msg.type).toBe('heartbeat')
     })
 
-    // Regression for #8452: dispatched_at / last_heartbeat_at are written by
-    // datetime('now') (space-format, e.g. "2026-07-12 12:00:00") while the
-    // threshold is ISO ("...T11:55:00.000Z"). Raw TEXT ordering ranks the space
-    // (0x20) below the 'T' (0x54) at index 10, flagging fresh same-date rows.
-    // Same-UTC-date midnight threshold: keeps the buggy space-vs-'T' compare in
-    // play so this guards the fix at a day boundary (#8452; idea from @KMGeon's #8453).
-    // Guards the last_heartbeat_at half of the fix on its own: a worker
-    // dispatched long before the threshold (stale under either format) that
-    // just sent a fresh space-format heartbeat must stay fresh (#8452).
     it('getThreadMessagesFor returns only same-thread replies to a handle', () => {
       const d = createDb()
       const outbound = d.insertMessage({
