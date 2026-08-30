@@ -67,17 +67,22 @@ describe('TerminalWebView surface readiness gate', () => {
     return { renderer, ref }
   }
 
-  it('hides the surface until the document reports web-ready', () => {
+  it('hides the surface through web-ready and reveals only on the painted ready', () => {
     const { renderer } = render()
     expect(webViewIsHidden(renderer)).toBe(true)
 
+    // Why: web-ready proves script liveness, not a committed repaint — still hidden.
     deliverMessage(renderer, { type: 'web-ready' })
+    expect(webViewIsHidden(renderer)).toBe(true)
+
+    deliverMessage(renderer, { type: 'ready' })
     expect(webViewIsHidden(renderer)).toBe(false)
   })
 
-  it('hides again on load start and reveals on the recovery pong', () => {
+  it('hides again on load start and stays hidden through the recovery pong until ready', () => {
     const { renderer, ref } = render()
     deliverMessage(renderer, { type: 'web-ready' })
+    deliverMessage(renderer, { type: 'ready' })
     expect(webViewIsHidden(renderer)).toBe(false)
 
     act(() => {
@@ -91,9 +96,12 @@ describe('TerminalWebView surface readiness gate', () => {
     })
     expect(webViewIsHidden(renderer)).toBe(true)
 
-    // Why: the recovery ping is message id 2 here (set-theme after web-ready is id 1).
     const pingId = JSON.parse(mocks.postMessage.mock.calls.at(-1)?.[0] as string).id as number
     deliverMessage(renderer, { type: 'pong', pingId })
+    // Why: the pong restores messaging, but only the re-init 'ready' proves a repaint.
+    expect(webViewIsHidden(renderer)).toBe(true)
+
+    deliverMessage(renderer, { type: 'ready' })
     expect(webViewIsHidden(renderer)).toBe(false)
   })
 
@@ -102,6 +110,7 @@ describe('TerminalWebView surface readiness gate', () => {
     try {
       const { renderer, ref } = render()
       deliverMessage(renderer, { type: 'web-ready' })
+      deliverMessage(renderer, { type: 'ready' })
       act(() => {
         ref.current?.prepareForForegroundRecovery()
       })

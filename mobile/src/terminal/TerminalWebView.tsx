@@ -45,8 +45,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   const webViewRef = useRef<WebView>(null)
   const isWebReadyRef = useRef(false)
   // Why: the engine's inline script blocks the document's first paint, and iOS can resume
-  // with a blanked backing store — both show the native white surface. Track readiness as
-  // state so the WebView stays hidden behind the themed container until it can paint (#17304).
+  // with a blanked backing store — both show the native white surface. Track paint readiness
+  // as state so the WebView stays hidden behind the themed container until the 'ready'
+  // notification, which follows the post-init rAF chain and thus a committed paint (#17304).
   const [surfaceReady, setSurfaceReady] = useState(false)
   const pendingMessages = useMemo(() => createTerminalWebViewPendingMessages(), [])
   const messageIdRef = useRef(0)
@@ -107,7 +108,6 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     (notifyParent: boolean) => {
       pendingPingIdRef.current = null
       isWebReadyRef.current = true
-      setSurfaceReady(true)
       clearWebReadyWatchdog()
       clearEngineError()
       if (notifyParent) {
@@ -151,6 +151,10 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         // renderService is populated, first paint has happened. Resolve
         // any pending awaitReady() so a queued measure can now safely
         // read cell dims.
+        // Why: web-ready/pong prove script liveness, not a committed repaint — revealing
+        // there can still show the native white surface. 'ready' follows the rAF chain
+        // after first paint, so this is the earliest honest moment to show the surface.
+        setSurfaceReady(true)
         const resolve = readyResolveRef.current
         readyResolveRef.current = null
         readyPromiseRef.current = null
