@@ -125,25 +125,15 @@ function isWorkerReportOutcome(value: unknown): value is 'succeeded' | 'failed' 
   return value === 'succeeded' || value === 'failed'
 }
 
+const INVALID_SEND_TYPE_MESSAGE = `Invalid --type: expected one of ${MESSAGE_TYPES.join(', ')}; to answer a worker question, use \`orchestration reply --id <msg_id>\` instead of send.`
+
 const SendParams = z
   .object({
     to: OptionalString,
     subject: requiredString('Missing --subject'),
     from: OptionalString,
     body: OptionalString,
-    type: z
-      .enum([
-        'status',
-        'dispatch',
-        'worker_done',
-        'merge_ready',
-        'escalation',
-        'handoff',
-        'decision_gate',
-        'question',
-        'heartbeat'
-      ])
-      .optional(),
+    type: z.enum(MESSAGE_TYPES, { error: () => INVALID_SEND_TYPE_MESSAGE }).optional(),
     priority: z.enum(['normal', 'high', 'urgent']).optional(),
     threadId: OptionalString,
     payload: OptionalString,

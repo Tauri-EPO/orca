@@ -197,10 +197,24 @@ export class InvalidArgumentError extends Error {
   }
 }
 
-// Why: CLI surfaces one string; take the first issue's message, which each schema authors as the user-facing phrasing.
+// Why: zod ships sideEffects:false, so the bundle drops its en locale and generic invalid_value issues must be reconstructed from "Invalid input".
 export function formatZodError(error: ZodError): string {
   const first = error.issues[0]
-  return first?.message ?? 'invalid_argument'
+  if (!first) {
+    return 'invalid_argument'
+  }
+  let message = first.message
+  if (first.code === 'invalid_value' && first.values.length > 0 && message === 'Invalid input') {
+    message =
+      first.values.length === 1
+        ? `Invalid input: expected ${formatZodValue(first.values[0])}`
+        : `Invalid option: expected one of ${first.values.map(formatZodValue).join('|')}`
+  }
+  return message
+}
+
+function formatZodValue(value: unknown): string {
+  return typeof value === 'string' ? JSON.stringify(value) : String(value)
 }
 
 export { ZodError }
