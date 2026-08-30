@@ -224,8 +224,9 @@ export const CORE_COMMAND_SPECS: CommandSpec[] = [
     path: ['terminal', 'send'],
     summary: 'Send input to a live terminal',
     usage:
-      'orca terminal send [--terminal <handle>] [--text <text>] [--enter] [--interrupt] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'terminal', 'text', 'enter', 'interrupt']
+      'orca terminal send [--terminal <handle>] [--text <text> | --text-file <path|->] [--enter] [--interrupt] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'terminal', 'text', 'text-file', 'enter', 'interrupt'],
+    notes: ['Use --text-file - to read multiline terminal input from stdin.']
   },
   {
     path: ['terminal', 'wait'],
