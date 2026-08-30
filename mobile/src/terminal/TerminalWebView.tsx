@@ -1,4 +1,4 @@
-import { useRef, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react'
+import { useRef, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo, useState } from 'react'
 import { Platform, View } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import type { TerminalOscLinkRange } from '../../../src/shared/terminal-osc-link-ranges'
@@ -44,6 +44,10 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 ) {
   const webViewRef = useRef<WebView>(null)
   const isWebReadyRef = useRef(false)
+  // Why: the engine's inline script blocks the document's first paint, and iOS can resume
+  // with a blanked backing store — both show the native white surface. Track readiness as
+  // state so the WebView stays hidden behind the themed container until it can paint (#17304).
+  const [surfaceReady, setSurfaceReady] = useState(false)
   const pendingMessages = useMemo(() => createTerminalWebViewPendingMessages(), [])
   const messageIdRef = useRef(0)
   const pendingPingIdRef = useRef<number | null>(null)
@@ -103,6 +107,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     (notifyParent: boolean) => {
       pendingPingIdRef.current = null
       isWebReadyRef.current = true
+      setSurfaceReady(true)
       clearWebReadyWatchdog()
       clearEngineError()
       if (notifyParent) {
@@ -195,6 +200,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 
   const handleLoadStart = useCallback(() => {
     isWebReadyRef.current = false
+    setSurfaceReady(false)
     pendingPingIdRef.current = null
     armWebReadyWatchdog()
     // Why: messages queued for a previous WebView generation are stale after a reload;
@@ -240,6 +246,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         // Why: direct ping is the only command allowed through while readiness is
         // invalid; init/write commands queue until this exact document answers.
         isWebReadyRef.current = false
+        // Why: a blanked store shows white until repaint; hiding is invisible because the
+        // container shares the terminal background.
+        setSurfaceReady(false)
         armWebReadyWatchdog()
         pendingPingIdRef.current = sendToWebView({ type: 'ping' })
       },
@@ -368,7 +377,10 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
       <WebView
         ref={webViewRef}
         source={XTERM_WEBVIEW_SOURCE}
-        style={TERMINAL_WEBVIEW_FRAME_STYLES.webview}
+        style={[
+          TERMINAL_WEBVIEW_FRAME_STYLES.webview,
+          !surfaceReady && TERMINAL_WEBVIEW_FRAME_STYLES.webviewHidden
+        ]}
         originWhitelist={['*']}
         javaScriptEnabled
         scrollEnabled={false}
