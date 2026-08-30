@@ -9,6 +9,7 @@ import {
 } from './terminal-webview-engine-error-state'
 import { TERMINAL_WEBVIEW_FRAME_STYLES } from './terminal-webview-frame-styles'
 import { useTerminalWebReadyWatchdog } from './terminal-webview-ready-watchdog'
+import { useTerminalWebViewPingProbe } from './terminal-webview-ping-probe'
 import { XTERM_WEBVIEW_SOURCE } from './terminal-webview-html'
 import type { TerminalWebViewCommand } from './terminal-webview-messages'
 import { createTerminalWebViewPendingMessages } from './terminal-webview-pending-messages'
@@ -64,9 +65,14 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   const readyResolveRef = useRef<(() => void) | null>(null)
   const { clearEngineError, engineError, reportEngineError, reportNativeEngineError } =
     useTerminalWebViewEngineErrorState(onEngineError)
+  const webReadyProbeRef = useRef<(() => void) | null>(null)
+  const runWebReadyProbe = useCallback(() => {
+    webReadyProbeRef.current?.()
+  }, [])
   const { armWebReadyWatchdog, clearWebReadyWatchdog } = useTerminalWebReadyWatchdog(
     isWebReadyRef,
-    reportEngineError
+    reportEngineError,
+    runWebReadyProbe
   )
 
   const sendToWebView = useCallback((msg: TerminalWebViewCommand) => {
@@ -79,6 +85,12 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   const flushPendingMessages = useCallback(() => {
     pendingMessages.flush(sendToWebView)
   }, [pendingMessages, sendToWebView])
+
+  const sendProbePing = useCallback(() => {
+    pendingPingIdRef.current = sendToWebView({ type: 'ping' })
+  }, [sendToWebView])
+  const { attemptPingRecovery, cancelPingProbe, markRecoveryPing, takeProbeNotifyParent } =
+    useTerminalWebViewPingProbe(isWebReadyRef, sendProbePing)
 
   const postMessage = useCallback(
     (msg: TerminalWebViewCommand) => {
@@ -108,6 +120,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     (notifyParent: boolean) => {
       pendingPingIdRef.current = null
       isWebReadyRef.current = true
+      cancelPingProbe()
       clearWebReadyWatchdog()
       clearEngineError()
       if (notifyParent) {
@@ -119,6 +132,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
       flushPendingMessages()
     },
     [
+      cancelPingProbe,
       clearEngineError,
       clearWebReadyWatchdog,
       flushPendingMessages,
@@ -145,7 +159,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         typeof msg.pingId === 'number' &&
         msg.pingId === pendingPingIdRef.current
       ) {
-        confirmWebReady(false)
+        // Why: a watchdog/reload probe must notify the parent so it resubscribes and
+        // re-inits (the repaint); the foreground-recovery ping runs its own resubscribe.
+        confirmWebReady(takeProbeNotifyParent())
       } else if (msg.type === 'ready') {
         // Why: the WebView's init() rAF chain has run — term is open,
         // renderService is populated, first paint has happened. Resolve
@@ -198,9 +214,21 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
       onTerminalTap,
       onFileTap,
       onOpenUrl,
-      onTextScaleChange
+      onTextScaleChange,
+      takeProbeNotifyParent
     ]
   )
+
+  useEffect(() => {
+    webReadyProbeRef.current = () => {
+      attemptPingRecovery(true, () =>
+        reportEngineError(
+          'Terminal did not initialize - no ready signal from the terminal view',
+          true
+        )
+      )
+    }
+  }, [attemptPingRecovery, reportEngineError])
 
   const handleLoadStart = useCallback(() => {
     isWebReadyRef.current = false
@@ -215,8 +243,10 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 
   const handleReload = useCallback(() => {
     clearEngineError()
-    webViewRef.current?.reload()
-  }, [clearEngineError])
+    // Why: in the wedged live-document state, reload reproduces the same error while a
+    // ping recovers instantly (the app-switch cure); reload stays as the last resort.
+    attemptPingRecovery(true, () => webViewRef.current?.reload())
+  }, [attemptPingRecovery, clearEngineError])
 
   const handleContentProcessDidTerminate = useCallback(() => {
     // Why: WKWebView content-process loss is recoverable; stale commands belong
@@ -253,6 +283,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         // Why: a blanked store shows white until repaint; hiding is invisible because the
         // container shares the terminal background.
         setSurfaceReady(false)
+        markRecoveryPing()
         armWebReadyWatchdog()
         pendingPingIdRef.current = sendToWebView({ type: 'ping' })
       },
@@ -373,7 +404,15 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         })
       }
     }),
-    [armWebReadyWatchdog, postMessage, sendToWebView, terminalTheme, textScale, writeCoalescer]
+    [
+      armWebReadyWatchdog,
+      markRecoveryPing,
+      postMessage,
+      sendToWebView,
+      terminalTheme,
+      textScale,
+      writeCoalescer
+    ]
   )
 
   return (
