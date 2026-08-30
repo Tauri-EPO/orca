@@ -5,10 +5,12 @@ import type { TerminalWebViewHandle } from './terminal-webview-contract'
 
 const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
+  reload: vi.fn(),
   platformOS: { value: 'ios' }
 }))
 
 vi.mock('react-native', () => ({
+  AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
   Platform: {
     get OS() {
       return mocks.platformOS.value
@@ -25,7 +27,7 @@ vi.mock('lucide-react-native', () => ({ RefreshCw: 'RefreshCw' }))
 vi.mock('react-native-webview', () => ({
   WebView: forwardRef(function MockWebView(props: Record<string, unknown>, ref) {
     if (ref && typeof ref === 'object') {
-      ;(ref as { current: unknown }).current = { postMessage: mocks.postMessage }
+      ;(ref as { current: unknown }).current = { postMessage: mocks.postMessage, reload: mocks.reload }
     }
     return createElement('WebView', props)
   })
@@ -36,6 +38,7 @@ vi.mock('./terminal-webview-html', () => ({ XTERM_WEBVIEW_SOURCE: { html: '<html
 
 import { TerminalWebView } from './TerminalWebView'
 import { TERMINAL_WEBVIEW_FRAME_STYLES } from './terminal-webview-frame-styles'
+import { TerminalWebViewEngineErrorOverlay } from './terminal-webview-engine-error-state'
 
 function findWebView(renderer: ReactTestRenderer) {
   return renderer.root.findByType('WebView' as never)
@@ -103,6 +106,102 @@ describe('TerminalWebView surface readiness gate', () => {
 
     deliverMessage(renderer, { type: 'ready' })
     expect(webViewIsHidden(renderer)).toBe(false)
+  })
+
+  function lastPostedPingId(): number {
+    const pings = mocks.postMessage.mock.calls
+      .map((c) => JSON.parse(c[0] as string) as { type: string; id: number })
+      .filter((m) => m.type === 'ping')
+    expect(pings.length).toBeGreaterThan(0)
+    return pings.at(-1)!.id
+  }
+
+  it('watchdog pings the live document before surfacing the engine error', () => {
+    vi.useFakeTimers()
+    const onWebReady = vi.fn()
+    const onEngineError = vi.fn()
+    const ref = { current: null as TerminalWebViewHandle | null }
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, { ref, onWebReady, onEngineError } as never))
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    // Why: the probe replaces the immediate error — a ping goes out instead.
+    expect(onEngineError).not.toHaveBeenCalled()
+    const pingId = lastPostedPingId()
+
+    deliverMessage(renderer, { type: 'pong', pingId })
+    // Why: the probe's pong must notify the parent so it resubscribes and re-inits.
+    expect(onWebReady).toHaveBeenCalledTimes(1)
+    act(() => {
+      vi.advanceTimersByTime(60000)
+    })
+    expect(onEngineError).not.toHaveBeenCalled()
+  })
+
+  it('watchdog still errors when the probe goes unanswered', () => {
+    vi.useFakeTimers()
+    const onEngineError = vi.fn()
+    act(() => {
+      create(createElement(TerminalWebView, { onEngineError } as never))
+    })
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    expect(onEngineError).not.toHaveBeenCalled()
+    act(() => {
+      vi.advanceTimersByTime(2500)
+    })
+    expect(onEngineError).toHaveBeenCalled()
+  })
+
+  it('reload button pings first and only reloads when the probe expires', () => {
+    vi.useFakeTimers()
+    const onEngineError = vi.fn()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, { onEngineError } as never))
+    })
+    act(() => {
+      vi.advanceTimersByTime(15000 + 2500)
+    })
+    expect(onEngineError).toHaveBeenCalled()
+
+    const overlay = renderer.root.findByType(TerminalWebViewEngineErrorOverlay)
+    act(() => {
+      overlay.props.onReload()
+    })
+    expect(mocks.reload).not.toHaveBeenCalled()
+    const pingId = lastPostedPingId()
+
+    deliverMessage(renderer, { type: 'pong', pingId })
+    act(() => {
+      vi.advanceTimersByTime(60000)
+    })
+    // Why: the live document answered — reload never fires.
+    expect(mocks.reload).not.toHaveBeenCalled()
+  })
+
+  it('reload button falls back to a real reload when the document stays silent', () => {
+    vi.useFakeTimers()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, {} as never))
+    })
+    act(() => {
+      vi.advanceTimersByTime(15000 + 2500)
+    })
+    const overlay = renderer.root.findByType(TerminalWebViewEngineErrorOverlay)
+    act(() => {
+      overlay.props.onReload()
+    })
+    act(() => {
+      vi.advanceTimersByTime(2500)
+    })
+    expect(mocks.reload).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the surface visible on non-iOS foreground recovery', () => {
