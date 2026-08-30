@@ -384,8 +384,8 @@ describe('terminal send CLI', () => {
     printHelp(COMMAND_SPECS, ['terminal', 'send'])
 
     const help = String(log.mock.calls[0]?.[0])
+    // Why: the usage line is the only budgeted spot in specs/core.ts; it must carry the stdin form.
     expect(help).toContain('--text-file <path|->')
-    expect(help).toContain('--text-file - to read multiline terminal input from stdin')
   })
 })
 
