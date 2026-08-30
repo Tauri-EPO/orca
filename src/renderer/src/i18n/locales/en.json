@@ -704,7 +704,7 @@
             "superviseTitle": "Supervise a worker to completion",
             "superviseSummary": "Dispatch a task and wait for the worker to report done or escalate.",
             "decisionGateTitle": "Pause for a decision before continuing",
-            "decisionGateSummary": "Let a child agent block on your answer instead of guessing."
+            "decisionGateSummary": "Gate the next dispatch on your approval instead of letting agents guess."
           }
         }
       },

@@ -24,10 +24,10 @@ export const getOrchestrationUsageExamples = createLocalizedCatalog((): SkillUsa
     ),
     summary: translate(
       'auto.lib.orchestration.usage.examples.decisionGateSummary',
-      'Let a child agent block on your answer instead of guessing.'
+      'Gate the next dispatch on your approval instead of letting agents guess.'
     ),
     prompt:
-      'Use /orchestration to run this schema change with a decision gate before the destructive migration step, so it waits for my approval.'
+      'Use /orchestration to run this schema change and open a decision gate before dispatching the destructive migration step, so it waits for my approval.'
   },
   {
     id: 'child-sequence',
