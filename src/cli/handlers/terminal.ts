@@ -80,9 +80,13 @@ async function getTerminalSendText(
   if (!flags.has('text-file')) {
     return getOptionalStringFlag(flags, 'text')
   }
-  const text = await readTerminalSendTextFile(getRequiredStringFlag(flags, 'text-file'), cwd)
+  const path = getRequiredStringFlag(flags, 'text-file')
+  const text = await readTerminalSendTextFile(path, cwd)
+  if (text.length === 0) {
+    throw new RuntimeClientError('invalid_argument', `Text file "${path}" is empty.`)
+  }
   assertTerminalInputWithinLimit(text)
-  return text.length > 0 ? text : undefined
+  return text
 }
 
 const terminalFocusHandler: CommandHandler = async ({ flags, client, cwd, json }) => {

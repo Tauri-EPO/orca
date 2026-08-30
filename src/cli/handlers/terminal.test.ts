@@ -284,6 +284,53 @@ describe('terminal send CLI', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
+  it('rejects an empty text file with an error naming the path', async () => {
+    const cwd = await createTempDirectory()
+    await writeFile(join(cwd, 'empty-prompt.txt'), '', 'utf8')
+    const call = vi.fn()
+
+    await expect(
+      TERMINAL_HANDLERS['terminal send']({
+        flags: new Map<string, string | true>([
+          ['terminal', 'term-1'],
+          ['text-file', 'empty-prompt.txt']
+        ]),
+        client: { call } as unknown as RuntimeClient,
+        cwd,
+        json: true
+      })
+    ).rejects.toMatchObject({
+      code: 'invalid_argument',
+      message: 'Text file "empty-prompt.txt" is empty.'
+    })
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('rejects empty stdin as an empty text file', async () => {
+    const stdin = mockStdin([])
+    const call = vi.fn()
+
+    try {
+      await expect(
+        TERMINAL_HANDLERS['terminal send']({
+          flags: new Map<string, string | true>([
+            ['terminal', 'term-1'],
+            ['text-file', '-']
+          ]),
+          client: { call } as unknown as RuntimeClient,
+          cwd: '/tmp/worktree',
+          json: true
+        })
+      ).rejects.toMatchObject({
+        code: 'invalid_argument',
+        message: 'Text file "-" is empty.'
+      })
+    } finally {
+      stdin.restore()
+    }
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it('rejects text files above the terminal input limit', async () => {
     const cwd = await createTempDirectory()
     const path = join(cwd, 'oversized.txt')
