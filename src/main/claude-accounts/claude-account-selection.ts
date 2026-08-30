@@ -50,7 +50,8 @@ export class ClaudeAccountSelection {
           activeClaudeManagedAccountIdsByRuntime: nextSelection
         }, { notifyListeners: true })
         await this.syncRuntimeAuth(target)
-        this.store.updateSettings({ claudeManagedAccounts: nextAccounts })
+        // Why: an external removal must also broadcast the roster, or the renderer keeps the removed account until an unrelated refetch.
+        this.store.updateSettings({ claudeManagedAccounts: nextAccounts }, { notifyListeners: true })
       } else {
         this.store.updateSettings({
           claudeManagedAccounts: nextAccounts,
