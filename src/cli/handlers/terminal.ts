@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type {
   RuntimeTerminalClose,
@@ -17,7 +18,7 @@ import {
   TERMINAL_INPUT_MAX_BYTES,
   TERMINAL_INPUT_TOO_LARGE_ERROR
 } from '../../shared/terminal-input'
-import { readStdinTextWithinLimit } from '../bounded-stdin-text'
+import { readStdinTextWithinLimit, readTextStreamWithinLimit } from '../bounded-stdin-text'
 import type { CommandHandler } from '../dispatch'
 import { shouldUseRendererBackedInteractiveTerminal } from '../codex-command-classification'
 import {
@@ -52,16 +53,25 @@ import {
 const DEFAULT_TERMINAL_WAIT_RPC_TIMEOUT_MS = 5 * 60 * 1000
 
 async function readTerminalSendTextFile(path: string, cwd: string): Promise<string> {
+  const createTooLargeError = (): RuntimeClientError =>
+    new RuntimeClientError('invalid_argument', TERMINAL_INPUT_TOO_LARGE_ERROR)
   if (path === '-') {
-    return readStdinTextWithinLimit(
-      TERMINAL_INPUT_MAX_BYTES,
-      () => new RuntimeClientError('invalid_argument', TERMINAL_INPUT_TOO_LARGE_ERROR)
-    )
+    return readStdinTextWithinLimit(TERMINAL_INPUT_MAX_BYTES, createTooLargeError)
   }
   const resolvedPath = resolve(cwd, path)
   try {
-    return await readFile(resolvedPath, 'utf8')
+    if ((await stat(resolvedPath)).size > TERMINAL_INPUT_MAX_BYTES) {
+      throw createTooLargeError()
+    }
+    return await readTextStreamWithinLimit(
+      createReadStream(resolvedPath),
+      TERMINAL_INPUT_MAX_BYTES,
+      createTooLargeError
+    )
   } catch (error) {
+    if (error instanceof RuntimeClientError) {
+      throw error
+    }
     const detail = error instanceof Error ? `: ${error.message}` : ''
     throw new RuntimeClientError('invalid_argument', `Unable to read text file "${path}"${detail}`)
   }

@@ -1,4 +1,5 @@
 import { mkdtemp, open, rm, writeFile } from 'node:fs/promises'
+import type { createReadStream as NodeCreateReadStream } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +12,16 @@ import { parseArgs } from '../args'
 import { printHelp } from '../help'
 import { COMMAND_SPECS } from '../specs'
 import { TERMINAL_HANDLERS } from './terminal'
+
+const { createReadStreamMock } = vi.hoisted(() => ({ createReadStreamMock: vi.fn() }))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<
+    Record<string, unknown> & { createReadStream: typeof NodeCreateReadStream }
+  >()
+  createReadStreamMock.mockImplementation(actual.createReadStream)
+  return { ...actual, createReadStream: createReadStreamMock }
+})
 
 const ORIGINAL_EXIT_CODE = process.exitCode
 
@@ -331,12 +342,13 @@ describe('terminal send CLI', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
-  it('rejects text files above the terminal input limit', async () => {
+  it('rejects oversized text files before opening a read stream', async () => {
     const cwd = await createTempDirectory()
     const path = join(cwd, 'oversized.txt')
     const handle = await open(path, 'w')
     await handle.truncate(TERMINAL_INPUT_MAX_BYTES + 1)
     await handle.close()
+    createReadStreamMock.mockClear()
     const call = vi.fn()
 
     await expect(
@@ -349,7 +361,36 @@ describe('terminal send CLI', () => {
         cwd,
         json: true
       })
-    ).rejects.toThrow(TERMINAL_INPUT_TOO_LARGE_ERROR)
+    ).rejects.toMatchObject({
+      code: 'invalid_argument',
+      message: TERMINAL_INPUT_TOO_LARGE_ERROR
+    })
+    expect(createReadStreamMock).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('reports oversized stdin with the same JSON error code', async () => {
+    const stdin = mockStdin(['x'.repeat(TERMINAL_INPUT_MAX_BYTES), 'x'])
+    const call = vi.fn()
+
+    try {
+      await expect(
+        TERMINAL_HANDLERS['terminal send']({
+          flags: new Map<string, string | true>([
+            ['terminal', 'term-1'],
+            ['text-file', '-']
+          ]),
+          client: { call } as unknown as RuntimeClient,
+          cwd: '/tmp/worktree',
+          json: true
+        })
+      ).rejects.toMatchObject({
+        code: 'invalid_argument',
+        message: TERMINAL_INPUT_TOO_LARGE_ERROR
+      })
+    } finally {
+      stdin.restore()
+    }
     expect(call).not.toHaveBeenCalled()
   })
 
