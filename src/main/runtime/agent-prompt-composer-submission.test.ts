@@ -109,6 +109,41 @@ describe('agent prompt submission observes the composer', () => {
     expect(enters(writes)).toBe(1)
   })
 
+  // Why (field, 2026-09-01): two Codex dispatches came back input_accepted while the payload sat
+  // as `[Pasted Content N chars]` for four hours — the agent was already `working` from its session
+  // hook and kept painting, so output-after-Enter passed as delivery evidence.
+  it('does not accept a busy agent painting around a parked payload; re-sends Enter until it clears', async () => {
+    vi.useFakeTimers()
+    let enterCount = 0
+    const { runtime, handle, writes } = await createAgentPromptSubmissionRuntime(
+      (runtime, data) => {
+        if (data.includes(AGENT_PROMPT_BRACKETED_PASTE_END)) {
+          runtime.onPtyData(PTY, codexFrame('[Pasted Content 4087 chars]'), Date.now())
+        } else if (data === '\r') {
+          enterCount += 1
+          runtime.onPtyData(
+            PTY,
+            enterCount === 1 ? codexFrame('[Pasted Content 4087 chars]') : codexFrame(''),
+            Date.now()
+          )
+        }
+      },
+      'codex',
+      { seedReadyHeader: false }
+    )
+    runtime.onPtyData(
+      PTY,
+      `${BRACKETED_PASTE_ON}${codexFrame('')}\x1b]0;Codex working\x07`,
+      Date.now()
+    )
+
+    const submission = runtime.sendTerminalAgentPrompt(handle, PROMPT)
+    await vi.runAllTimersAsync()
+
+    await expect(submission).resolves.toMatchObject({ accepted: true })
+    expect(enters(writes)).toBe(2)
+  })
+
   it('keeps re-sending Enter with backoff and only then reports a parked payload as stalled', async () => {
     vi.useFakeTimers()
     const { runtime, handle, writes } = await createAgentPromptSubmissionRuntime(

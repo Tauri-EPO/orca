@@ -134,26 +134,47 @@ export async function verifyAgentPromptSubmission(
     assertPromptNotBlocked(options.baseline, current)
     return agentPromptEffectObserved(options.baseline, current)
   }
+  // Why: a busy agent keeps painting after Enter whether or not it took the paste, and its session
+  // hook can already read `working`. Activity therefore proves nothing while the payload is still on
+  // screen; the composer's last verdict has to release it first. While that holds, the composer is
+  // re-read at most once per confirm window so a retry that lands is noticed without hammering.
+  let lastComposerReadAt = -Infinity
+  const activityProvesSubmission = async (): Promise<boolean> => {
+    if (!composer || !sawPending || lastVerdict !== 'pending') {
+      return true
+    }
+    if (Date.now() - lastComposerReadAt < AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS) {
+      return false
+    }
+    lastComposerReadAt = Date.now()
+    lastVerdict = await composer.read()
+    return lastVerdict !== 'pending' && activityObserved()
+  }
 
   while (Date.now() < deadline) {
-    if (activityObserved()) {
+    const elapsed = Date.now() - startedAt
+    const checkpointDue =
+      composer !== undefined &&
+      nextCheckpoint < retryDelaysMs.length &&
+      elapsed >= retryDelaysMs[nextCheckpoint]!
+    const confirmDue =
+      clearObservedAt !== null &&
+      Date.now() - clearObservedAt >= AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS
+    // Why: a due checkpoint owns this iteration's read, so a parked payload gets its Enter before
+    // the activity path can spend the read and swallow the retry.
+    if (activityObserved() && !checkpointDue && !confirmDue && (await activityProvesSubmission())) {
       return { evidence: 'activity', enterRetries }
     }
     if (composer) {
-      const elapsed = Date.now() - startedAt
-      const checkpointDue =
-        nextCheckpoint < retryDelaysMs.length && elapsed >= retryDelaysMs[nextCheckpoint]!
-      const confirmDue =
-        clearObservedAt !== null &&
-        Date.now() - clearObservedAt >= AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS
       if (checkpointDue || confirmDue) {
         if (checkpointDue) {
           nextCheckpoint += 1
         }
         throwIfAgentPromptAborted(options.signal)
+        lastComposerReadAt = Date.now()
         lastVerdict = await composer.read()
         // Why: the read is asynchronous; a turn start or a permission dialog may have landed meanwhile.
-        if (activityObserved()) {
+        if (lastVerdict !== 'pending' && activityObserved()) {
           return { evidence: 'activity', enterRetries }
         }
         if (lastVerdict === 'pending') {
@@ -184,7 +205,7 @@ export async function verifyAgentPromptSubmission(
     await waitForAgentPromptPoll(options.signal)
   }
 
-  if (activityObserved()) {
+  if (activityObserved() && (await activityProvesSubmission())) {
     return { evidence: 'activity', enterRetries }
   }
   throw new AgentPromptStalledError(lastVerdict, enterRetries)

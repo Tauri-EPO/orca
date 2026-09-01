@@ -327,7 +327,8 @@ describe('agent prompt submission verification with a composer observer', () => 
     expect(resubmit).toHaveBeenCalledTimes(2)
 
     current = activity({ workingSequence: 5, status: 'working' })
-    await vi.advanceTimersByTimeAsync(100)
+    // Why: the payload was last seen parked, so the activity only counts after a composer re-read.
+    await vi.advanceTimersByTimeAsync(AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS + 100)
 
     await expect(verification).resolves.toEqual({ evidence: 'activity', enterRetries: 2 })
   })
@@ -432,6 +433,43 @@ describe('agent prompt submission verification with a composer observer', () => 
       enterRetries: AGENT_PROMPT_SUBMIT_RETRY_DELAYS_MS.length
     })
     expect(resubmit).toHaveBeenCalledTimes(AGENT_PROMPT_SUBMIT_RETRY_DELAYS_MS.length)
+  })
+
+  // Why: a busy agent keeps printing after Enter whether or not it took the paste; the parked
+  // payload on screen outranks that activity until the composer is seen to let go of it.
+  it('does not accept activity while the payload still reads pending, then accepts once it clears', async () => {
+    vi.useFakeTimers()
+    // Reads: 0ms, 500ms, 1000ms (activity-triggered, one per confirm window), 1500ms (checkpoint,
+    // still pending → Enter again), 2000ms (cleared → the activity finally counts).
+    const { observer, read, resubmit } = composerObserver([
+      'pending',
+      'pending',
+      'pending',
+      'pending',
+      'clear'
+    ])
+    const baseline = activity({ status: 'working' })
+    const verification = verifyAgentPromptSubmission({
+      baseline,
+      readActivity: () => activity({ status: 'working', outputSequence: 9 }),
+      composer: observer
+    })
+    let settled = false
+    verification.then(
+      () => (settled = true),
+      () => (settled = true)
+    )
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(AGENT_PROMPT_SUBMIT_RETRY_DELAYS_MS[0]!)
+    expect(resubmit).toHaveBeenCalledTimes(1)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS + 100)
+
+    await expect(verification).resolves.toEqual({ evidence: 'activity', enterRetries: 1 })
+    expect(read).toHaveBeenCalledTimes(5)
   })
 
   it('does not re-send Enter once a permission state appears', async () => {
