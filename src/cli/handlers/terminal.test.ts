@@ -278,10 +278,18 @@ describe('terminal create CLI', () => {
     expect(await createWith(command)).toMatchObject({ command, launchAgent: agent })
   })
 
-  it.each(['codex exec "summarize"', 'claude -p "hello"', 'npm run dev', undefined])(
-    'leaves launchAgent unset for %s',
-    async (command) => {
-      expect(await createWith(command)).not.toHaveProperty('launchAgent')
-    }
-  )
+  it.each([
+    'codex exec "summarize"',
+    'claude -p "hello"',
+    'claude --version',
+    'npm run dev',
+    // Why: the interactivity of other agents' commands is not classified here, and a launchAgent
+    // also marks the pane unattended, so they stay unlabeled until the runtime infers them.
+    'gemini',
+    'opencode run "summarize"',
+    'aider --message "fix"',
+    undefined
+  ])('leaves launchAgent unset for %s', async (command) => {
+    expect(await createWith(command)).not.toHaveProperty('launchAgent')
+  })
 })

@@ -11,10 +11,7 @@ import type {
   RuntimeTerminalWait
 } from '../../shared/runtime-types'
 import type { CommandHandler } from '../dispatch'
-import {
-  shouldUseRendererBackedCodexTerminal,
-  shouldUseRendererBackedInteractiveTerminal
-} from '../codex-command-classification'
+import { shouldUseRendererBackedInteractiveTerminal } from '../codex-command-classification'
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 import {
   formatTerminalClose,
@@ -188,13 +185,16 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
     const focus = flags.get('focus') === true
     // Why (#17291): without this the pane has no launchAgent until the runtime infers one from an
     // OSC title, so a worker-start chained right after create takes the open-loop submit delay and
-    // the generic readiness path. The shared recognizer already drops `claude -p`; `codex exec` and
-    // its other one-shot subcommands are only known to the Codex classifier.
+    // the generic readiness path. Only claude and codex are labeled: they are the agents with an
+    // echo gate to unlock, and the only ones whose one-shot forms (`claude -p`, `codex exec`, …)
+    // are all known here. A launchAgent also marks the pane unattended, so an unknown agent's
+    // one-shot must not be guessed interactive.
     const recognizedAgent = recognizeAgentProcessFromCommandLine(command)?.agent
     const inferredLaunchAgent =
-      recognizedAgent === 'codex' && !shouldUseRendererBackedCodexTerminal(command)
-        ? undefined
-        : recognizedAgent
+      (recognizedAgent === 'claude' || recognizedAgent === 'codex') &&
+      shouldUseRendererBackedInteractiveTerminal(command)
+        ? recognizedAgent
+        : undefined
     const result = await client.call<{ terminal: RuntimeTerminalCreate }>('terminal.create', {
       worktree: await getBrowserWorktreeSelector(flags, cwd, client),
       command,
