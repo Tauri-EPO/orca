@@ -42,18 +42,24 @@ export function detectAgentPromptComposerVerdict(
   if (!screen || screen.lines.length === 0) {
     return 'unknown'
   }
-  if (screen.draft?.trim()) {
-    return 'pending'
+  const fragment = buildAgentPromptFragment(prompt)
+  // Why: a draft the operator typed is not the payload; another Enter would submit it, not ours.
+  const draft = screen.draft?.trim()
+  if (draft) {
+    return holdsInjectedPayload(draft, fragment) ? 'pending' : 'clear'
   }
   const composerText = findLastComposerLineText(screen.lines)
   if (composerText === null) {
     return 'unknown'
   }
-  if (PASTE_PLACEHOLDER_RE.test(composerText)) {
-    return 'pending'
-  }
-  const fragment = buildAgentPromptFragment(prompt)
-  return fragment !== null && composerText.includes(fragment) ? 'pending' : 'clear'
+  return holdsInjectedPayload(composerText, fragment) ? 'pending' : 'clear'
+}
+
+function holdsInjectedPayload(composerText: string, fragment: string | null): boolean {
+  return (
+    PASTE_PLACEHOLDER_RE.test(composerText) ||
+    (fragment !== null && composerText.includes(fragment))
+  )
 }
 
 // Why the last glyph line only: Claude keeps `> [Pasted text …]` in its transcript after submit,

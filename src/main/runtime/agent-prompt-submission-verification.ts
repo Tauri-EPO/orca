@@ -4,7 +4,8 @@ export {
 } from '../../shared/orchestration-timing-budgets'
 import {
   AGENT_PROMPT_EFFECT_TIMEOUT_MS,
-  AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS
+  AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS,
+  AGENT_PROMPT_VERIFICATION_MAX_MS
 } from '../../shared/orchestration-timing-budgets'
 import type { TuiAgent } from '../../shared/tui-agent'
 import type { AgentPromptComposerVerdict } from './agent-prompt-composer-pending'
@@ -148,6 +149,7 @@ export async function verifyAgentPromptSubmission(
     }
     lastComposerReadAt = Date.now()
     lastVerdict = await composer.read()
+    throwIfAgentPromptAborted(options.signal)
     return lastVerdict !== 'pending' && activityObserved()
   }
 
@@ -173,6 +175,7 @@ export async function verifyAgentPromptSubmission(
         throwIfAgentPromptAborted(options.signal)
         lastComposerReadAt = Date.now()
         lastVerdict = await composer.read()
+        throwIfAgentPromptAborted(options.signal)
         // Why: the read is asynchronous; a turn start or a permission dialog may have landed meanwhile.
         if (lastVerdict !== 'pending' && activityObserved()) {
           return { evidence: 'activity', enterRetries }
@@ -185,7 +188,11 @@ export async function verifyAgentPromptSubmission(
             await composer.resubmit()
             enterRetries += 1
             if (!graceApplied) {
-              deadline += composer.pendingGraceMs ?? AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS
+              // Why the cap: budgets downstream are derived from the verification ceiling.
+              deadline = Math.min(
+                deadline + (composer.pendingGraceMs ?? AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS),
+                startedAt + AGENT_PROMPT_VERIFICATION_MAX_MS
+              )
               graceApplied = true
             }
           }

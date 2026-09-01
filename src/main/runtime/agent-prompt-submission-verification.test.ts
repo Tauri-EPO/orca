@@ -472,6 +472,30 @@ describe('agent prompt submission verification with a composer observer', () => 
     expect(read).toHaveBeenCalledTimes(5)
   })
 
+  it('rejects request_aborted when the signal fires during a deferred composer read', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    let releaseRead!: (verdict: AgentPromptComposerVerdict) => void
+    const read = vi.fn(
+      () => new Promise<AgentPromptComposerVerdict>((resolve) => (releaseRead = resolve))
+    )
+    const baseline = activity({ status: 'working' })
+    const verification = verifyAgentPromptSubmission({
+      baseline,
+      readActivity: () => activity({ status: 'working', outputSequence: 9 }),
+      composer: { beforeSubmit: 'pending', read, resubmit: vi.fn() },
+      signal: controller.signal
+    })
+    const rejected = expect(verification).rejects.toThrow('request_aborted')
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(read).toHaveBeenCalledTimes(1)
+    controller.abort()
+    releaseRead('clear')
+
+    await rejected
+  })
+
   it('does not re-send Enter once a permission state appears', async () => {
     vi.useFakeTimers()
     let current = activity()

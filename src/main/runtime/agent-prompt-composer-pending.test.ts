@@ -16,13 +16,25 @@ describe('detectAgentPromptComposerVerdict', () => {
     expect(detectAgentPromptComposerVerdict({ lines: [] }, PROMPT)).toBe('unknown')
   })
 
-  it('is pending when the emulator extracted a non-empty composer draft', () => {
+  it('is pending when the emulator extracted a draft holding the payload', () => {
     expect(
       detectAgentPromptComposerVerdict(
         { lines: ['›'], draft: '[Pasted Content 5033 chars]' },
         PROMPT
       )
     ).toBe('pending')
+    expect(
+      detectAgentPromptComposerVerdict(
+        { lines: ['›'], draft: 'You are working on task task_123 for dispatch ctx_456.' },
+        PROMPT
+      )
+    ).toBe('pending')
+  })
+
+  it('is clear when the extracted draft is something else entirely', () => {
+    expect(
+      detectAgentPromptComposerVerdict({ lines: ['›'], draft: 'notes the operator typed' }, PROMPT)
+    ).toBe('clear')
   })
 
   it('is pending for a Codex pasted-content placeholder on the prompt line', () => {
