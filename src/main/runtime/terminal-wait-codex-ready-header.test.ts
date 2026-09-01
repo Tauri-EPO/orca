@@ -70,6 +70,37 @@ describe('tui-idle and the Codex boot header', () => {
     ).resolves.toMatchObject({ condition: 'tui-idle', status: 'running' })
   })
 
+  // Why: Codex repaints the rows in place, so a stacked tail holds the loading rows and the settled
+  // rows under one banner; the last painted row is the one that counts.
+  it('treats settled rows repainted under a single banner as ready', async () => {
+    const { runtime, handle } = await createCodexTerminal()
+    runtime.onPtyData(
+      PTY,
+      `${BOOT_HEADER} model:       gpt-5.6-sol medium\n directory:   /tmp/worktree-a\n`,
+      Date.now()
+    )
+
+    await expect(
+      runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    ).resolves.toMatchObject({ condition: 'tui-idle', status: 'running' })
+  })
+
+  it('does not read a model: label inside the directory value as the model row', async () => {
+    vi.useFakeTimers()
+    const { runtime, handle } = await createCodexTerminal()
+    runtime.onPtyData(
+      PTY,
+      ' >_ OpenAI Codex (v0.152.0)\n model:       loading\n directory:   /tmp/model:settled\n',
+      Date.now()
+    )
+
+    const wait = runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    const rejected = expect(wait).rejects.toThrow('timeout')
+    await vi.advanceTimersByTimeAsync(3_000)
+
+    await rejected
+  })
+
   it('does not treat a header whose values have not arrived yet as ready', async () => {
     vi.useFakeTimers()
     const { runtime, handle } = await createCodexTerminal()
