@@ -110,7 +110,27 @@ function findCodexReadyPromptIndex(normalized: string): number | null {
   }
   const readySegment = normalized.slice(headerIndex)
   // Why: Codex prints permissions only in YOLO mode; the stable ready header is OpenAI Codex + model + directory.
-  return readySegment.includes('model:') && readySegment.includes('directory:') ? headerIndex : null
+  // Why last occurrence: a repaint appends the settled row after the booting one in a stacked tail.
+  const modelIndex = readySegment.lastIndexOf('model:')
+  const directoryIndex = readySegment.lastIndexOf('directory:')
+  if (modelIndex === -1 || directoryIndex === -1) {
+    return null
+  }
+  // Why: the same header is painted with `model: loading` / `directory: loading` while Codex boots
+  // and its composer does not take input yet; only settled values are readiness.
+  if (
+    codexHeaderValueIsUnsettled(readySegment, modelIndex + 'model:'.length) ||
+    codexHeaderValueIsUnsettled(readySegment, directoryIndex + 'directory:'.length)
+  ) {
+    return null
+  }
+  return headerIndex
+}
+
+function codexHeaderValueIsUnsettled(segment: string, valueStart: number): boolean {
+  const lineEnd = segment.indexOf('\n', valueStart)
+  const value = segment.slice(valueStart, lineEnd === -1 ? undefined : lineEnd).trim()
+  return value.length === 0 || value.startsWith('loading')
 }
 
 function findAntigravityReadyPromptIndex(normalized: string): number | null {
