@@ -1,14 +1,41 @@
-export { AGENT_PROMPT_EFFECT_TIMEOUT_MS } from '../../shared/orchestration-timing-budgets'
-import { AGENT_PROMPT_EFFECT_TIMEOUT_MS } from '../../shared/orchestration-timing-budgets'
+export {
+  AGENT_PROMPT_EFFECT_TIMEOUT_MS,
+  AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS
+} from '../../shared/orchestration-timing-budgets'
+import {
+  AGENT_PROMPT_EFFECT_TIMEOUT_MS,
+  AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS
+} from '../../shared/orchestration-timing-budgets'
 import type { TuiAgent } from '../../shared/tui-agent'
+import type { AgentPromptComposerVerdict } from './agent-prompt-composer-pending'
 
 export const AGENT_PROMPT_HOOK_EFFECT_TIMEOUT_MS = AGENT_PROMPT_EFFECT_TIMEOUT_MS
 const AGENT_PROMPT_EFFECT_POLL_MS = 50
+/** When, after Enter, the composer is re-read and a still-parked payload gets Enter again.
+ *  Backs off so a slow first turn is not hammered, yet reaches a TUI that ate the first Enter
+ *  while it was still absorbing the paste (Codex over Windows console input records). */
+export const AGENT_PROMPT_SUBMIT_RETRY_DELAYS_MS: readonly number[] = [
+  1_500, 4_000, 9_000, 18_000, 36_000
+]
+/** A cleared composer must hold for this long before it counts as the payload being consumed. */
+export const AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS = 500
 
 const HOOK_OBSERVED_TURN_START_AGENTS = new Set<TuiAgent>(['codex', 'kimi'])
 
 /** The prompt bytes are written before verification, so this only ever means "not observed". */
 export const AGENT_PROMPT_STALLED_ERROR = 'agent_prompt_stalled'
+
+export class AgentPromptStalledError extends Error {
+  constructor(
+    /** What the rendered composer showed when the verdict was reached. */
+    readonly composer: AgentPromptComposerVerdict,
+    /** Extra Enters written after the first one. */
+    readonly enterRetries: number
+  ) {
+    super(AGENT_PROMPT_STALLED_ERROR)
+    this.name = 'AgentPromptStalledError'
+  }
+}
 
 export type AgentPromptActivity = Readonly<{
   generation: number
@@ -27,11 +54,29 @@ export type AgentPromptWaitTextCache = {
   waitText?: string
 }
 
+/** Rendered-screen view of the composer, for callers that can read one. */
+export type AgentPromptComposerObserver = {
+  /** Verdict read after the paste settled and before the first Enter. */
+  beforeSubmit: AgentPromptComposerVerdict
+  read: () => Promise<AgentPromptComposerVerdict>
+  /** Writes one more Enter; only invoked while the payload is visibly parked and nothing blocks. */
+  resubmit: () => Promise<void> | void
+  retryDelaysMs?: readonly number[]
+  pendingGraceMs?: number
+}
+
+export type AgentPromptSubmissionOutcome = {
+  /** `activity`: a turn-start/hook/output proof; `composer-cleared`: the parked payload vanished. */
+  evidence: 'activity' | 'composer-cleared'
+  enterRetries: number
+}
+
 type AgentPromptVerificationOptions = {
   baseline: AgentPromptActivity
   readActivity: () => AgentPromptActivity
   timeoutMs?: number
   signal?: AbortSignal
+  composer?: AgentPromptComposerObserver
 }
 
 export function resolveAgentPromptEffectTimeoutMs(agent: TuiAgent | null | undefined): number {
@@ -68,28 +113,81 @@ export function readAgentPromptWaitText(
 
 export async function verifyAgentPromptSubmission(
   options: AgentPromptVerificationOptions
-): Promise<void> {
+): Promise<AgentPromptSubmissionOutcome> {
   throwIfAgentPromptAborted(options.signal)
   assertPromptNotBlocked(options.baseline, options.baseline)
 
-  const deadline = Date.now() + (options.timeoutMs ?? AGENT_PROMPT_EFFECT_TIMEOUT_MS)
-  while (Date.now() < deadline) {
+  const startedAt = Date.now()
+  let deadline = startedAt + (options.timeoutMs ?? AGENT_PROMPT_EFFECT_TIMEOUT_MS)
+  const composer = options.composer
+  const retryDelaysMs = composer?.retryDelaysMs ?? AGENT_PROMPT_SUBMIT_RETRY_DELAYS_MS
+  let nextCheckpoint = 0
+  let enterRetries = 0
+  let lastVerdict: AgentPromptComposerVerdict = composer?.beforeSubmit ?? 'unknown'
+  let sawPending = lastVerdict === 'pending'
+  let clearObservedAt: number | null = null
+  let graceApplied = false
+
+  const activityObserved = (): boolean => {
     const current = options.readActivity()
     assertSamePromptGeneration(options.baseline, current)
     assertPromptNotBlocked(options.baseline, current)
-    if (agentPromptEffectObserved(options.baseline, current)) {
-      return
+    return agentPromptEffectObserved(options.baseline, current)
+  }
+
+  while (Date.now() < deadline) {
+    if (activityObserved()) {
+      return { evidence: 'activity', enterRetries }
+    }
+    if (composer) {
+      const elapsed = Date.now() - startedAt
+      const checkpointDue =
+        nextCheckpoint < retryDelaysMs.length && elapsed >= retryDelaysMs[nextCheckpoint]!
+      const confirmDue =
+        clearObservedAt !== null &&
+        Date.now() - clearObservedAt >= AGENT_PROMPT_COMPOSER_CLEAR_CONFIRM_MS
+      if (checkpointDue || confirmDue) {
+        if (checkpointDue) {
+          nextCheckpoint += 1
+        }
+        throwIfAgentPromptAborted(options.signal)
+        lastVerdict = await composer.read()
+        // Why: the read is asynchronous; a turn start or a permission dialog may have landed meanwhile.
+        if (activityObserved()) {
+          return { evidence: 'activity', enterRetries }
+        }
+        if (lastVerdict === 'pending') {
+          sawPending = true
+          clearObservedAt = null
+          if (checkpointDue) {
+            throwIfAgentPromptAborted(options.signal)
+            await composer.resubmit()
+            enterRetries += 1
+            if (!graceApplied) {
+              deadline += composer.pendingGraceMs ?? AGENT_PROMPT_PENDING_COMPOSER_GRACE_MS
+              graceApplied = true
+            }
+          }
+        } else if (lastVerdict === 'clear' && sawPending) {
+          // Why two reads: a frame caught mid-redraw can look empty; a payload that was on screen
+          // and stays gone across the confirm window was consumed by the TUI.
+          if (clearObservedAt === null) {
+            clearObservedAt = Date.now()
+          } else if (confirmDue) {
+            return { evidence: 'composer-cleared', enterRetries }
+          }
+        } else {
+          clearObservedAt = null
+        }
+      }
     }
     await waitForAgentPromptPoll(options.signal)
   }
 
-  const current = options.readActivity()
-  assertSamePromptGeneration(options.baseline, current)
-  assertPromptNotBlocked(options.baseline, current)
-  if (agentPromptEffectObserved(options.baseline, current)) {
-    return
+  if (activityObserved()) {
+    return { evidence: 'activity', enterRetries }
   }
-  throw new Error(AGENT_PROMPT_STALLED_ERROR)
+  throw new AgentPromptStalledError(lastVerdict, enterRetries)
 }
 
 function agentPromptEffectObserved(

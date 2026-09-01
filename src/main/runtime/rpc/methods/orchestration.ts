@@ -29,6 +29,7 @@ import {
   type SendRecipientWarning
 } from './orchestration-recipient-routing'
 import { buildInjectRejectionMessage } from './orchestration-inject-rejection-message'
+import { isAgentPromptStalledError } from '../../agent-prompt-submission-verification'
 import { parseOrchestrationTaskDepsFlag } from '../../orchestration/task-deps-flag'
 import { resolveRunScope } from './orchestration-run-scope'
 import { ORCHESTRATION_RUN_METHODS } from './orchestration-runs'
@@ -1691,21 +1692,35 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       })
 
       let injected = false
+      let promptUnobserved = false
       if (params.inject) {
         try {
           await runtime.sendTerminalAgentPrompt(to, preamble)
           injected = true
         } catch (err) {
-          db.failDispatch(ctx.id, err instanceof Error ? err.message : String(err))
-          throw err
+          // Why (#17066): the preamble is in the pane before verification runs, so a stall is an
+          // unobserved turn start, never proof it is missing. Failing here would revoke the capability
+          // the worker's heartbeat and worker_done need while it is already executing the task.
+          if (isAgentPromptStalledError(err)) {
+            injected = true
+            promptUnobserved = true
+            console.warn(
+              `[orchestration] dispatch ${ctx.id}: preamble injected into ${to} but its turn start was not observed; dispatch stays active`
+            )
+          } else {
+            db.failDispatch(ctx.id, err instanceof Error ? err.message : String(err))
+            throw err
+          }
         }
       }
 
       // Why: returnPreamble is opt-in because the preamble is several hundred bytes most callers don't need in the response.
-      if (params.returnPreamble) {
-        return { dispatch: ctx, injected, preamble }
+      return {
+        dispatch: ctx,
+        injected,
+        ...(promptUnobserved ? { promptUnobserved } : {}),
+        ...(params.returnPreamble ? { preamble } : {})
       }
-      return { dispatch: ctx, injected }
     }
   }),
 

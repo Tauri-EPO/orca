@@ -11,7 +11,11 @@ import type {
   RuntimeTerminalWait
 } from '../../shared/runtime-types'
 import type { CommandHandler } from '../dispatch'
-import { shouldUseRendererBackedInteractiveTerminal } from '../codex-command-classification'
+import {
+  shouldUseRendererBackedCodexTerminal,
+  shouldUseRendererBackedInteractiveTerminal
+} from '../codex-command-classification'
+import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 import {
   formatTerminalClose,
   formatTerminalCreate,
@@ -163,6 +167,15 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
     const useRendererBackedInteractiveTerminal =
       !client.isRemote && shouldUseRendererBackedInteractiveTerminal(command)
     const focus = flags.get('focus') === true
+    // Why (#17291): without this the pane has no launchAgent until the runtime infers one from an
+    // OSC title, so a worker-start chained right after create takes the open-loop submit delay and
+    // the generic readiness path. The shared recognizer already drops `claude -p`; `codex exec` and
+    // its other one-shot subcommands are only known to the Codex classifier.
+    const recognizedAgent = recognizeAgentProcessFromCommandLine(command)?.agent
+    const inferredLaunchAgent =
+      recognizedAgent === 'codex' && !shouldUseRendererBackedCodexTerminal(command)
+        ? undefined
+        : recognizedAgent
     const result = await client.call<{ terminal: RuntimeTerminalCreate }>('terminal.create', {
       worktree: await getBrowserWorktreeSelector(flags, cwd, client),
       command,
@@ -172,7 +185,8 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
       // unless the caller explicitly asks for focus.
       focus,
       ...(focus ? { presentation: 'focused' } : {}),
-      ...(useRendererBackedInteractiveTerminal ? { rendererBacked: true, activate: focus } : {})
+      ...(useRendererBackedInteractiveTerminal ? { rendererBacked: true, activate: focus } : {}),
+      ...(inferredLaunchAgent ? { launchAgent: inferredLaunchAgent } : {})
     })
     printResult(result, json, formatTerminalCreate)
   },

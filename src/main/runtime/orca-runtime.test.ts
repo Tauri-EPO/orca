@@ -68,6 +68,7 @@ import {
   resolveWorktreeScanCacheTtlMs,
   type RuntimeTerminalAgentStatusEvent
 } from './orca-runtime'
+import { AGENT_PROMPT_TEST_READY_HEADER } from './agent-prompt-submission-runtime-test-fixture'
 import { RUNTIME_GRAPH_RELOAD_TIMEOUT_MS } from './runtime-graph-reload-lifecycle'
 import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-instance'
@@ -17703,6 +17704,9 @@ describe('OrcaRuntimeService', () => {
         const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
           launchAgent: agent
         })
+        // Why: the paste path first waits for composer readiness; this suite measures the submit
+        // timing after the paste, so give it the cheapest readiness evidence up front.
+        runtime.onPtyData('pty-bg', AGENT_PROMPT_TEST_READY_HEADER, Date.now())
         const assertAuthority = vi.fn()
 
         const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change', {
@@ -17751,6 +17755,7 @@ describe('OrcaRuntimeService', () => {
       const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
         launchAgent: agent
       })
+      runtime.onPtyData('pty-bg', AGENT_PROMPT_TEST_READY_HEADER, Date.now())
 
       const submitDelayMs = getAgentPromptSubmitDelayMs(
         process.platform,
@@ -17793,6 +17798,7 @@ describe('OrcaRuntimeService', () => {
       const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
 
       await expect(runtime.isTerminalRunningSettledPromptAgent(handle)).resolves.toBe(true)
+      runtime.onPtyData('pty-bg', AGENT_PROMPT_TEST_READY_HEADER, Date.now())
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
       await vi.advanceTimersByTimeAsync(1_199)
       expect(writes).not.toContain('\r')
@@ -17827,6 +17833,7 @@ describe('OrcaRuntimeService', () => {
         launchAgent: 'claude'
       })
 
+      runtime.onPtyData('pty-bg', AGENT_PROMPT_TEST_READY_HEADER, Date.now())
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
       await vi.advanceTimersByTimeAsync(renderGateCapMs('review this change') - 1)
       expect(writes).not.toContain('\r')
@@ -17866,6 +17873,7 @@ describe('OrcaRuntimeService', () => {
         launchAgent: 'codex'
       })
 
+      runtime.onPtyData('pty-bg', AGENT_PROMPT_TEST_READY_HEADER, Date.now())
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
       await vi.advanceTimersByTimeAsync(8_000)
       expect(writes).not.toContain('\r')
@@ -17908,6 +17916,7 @@ describe('OrcaRuntimeService', () => {
         launchAgent: 'claude'
       })
 
+      runtime.onPtyData('pty-bg', AGENT_PROMPT_TEST_READY_HEADER, Date.now())
       const sendPromise = runtime.sendTerminalAgentPrompt(handle, 'review this change')
       // The marker at 100 ms re-arms the cap, but the ingest term is absolute: a prompt this
       // small is already ingested by then, so the fallback is one flat render timeout later.

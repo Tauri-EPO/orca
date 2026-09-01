@@ -162,6 +162,11 @@ import {
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
 import {
+  type AgentPromptComposerVerdict,
+  detectAgentPromptComposerVerdict
+} from './agent-prompt-composer-pending'
+import { AGENT_PROMPT_COMPOSER_READY_TIMEOUT_MS } from '../../shared/orchestration-timing-budgets'
+import {
   awaitWindowsHostGitEnvironmentReady,
   gitExecFileAsync,
   gitSpawnAfterWindowsEnvironmentReady,
@@ -655,7 +660,8 @@ import { resolveLocalWindowsAgentStartupShell } from '../../shared/windows-termi
 import {
   getTuiAgentLaunchCommand,
   isTuiAgent,
-  TUI_AGENT_CONFIG
+  TUI_AGENT_CONFIG,
+  type DraftPasteReadySignal
 } from '../../shared/tui-agent-config'
 import { resolveDraftPasteReadyTimeoutMs } from '../../shared/draft-paste-ready-timeout'
 import { createDraftPasteReadyScanner } from '../../shared/draft-paste-ready-scanner'
@@ -2222,6 +2228,10 @@ const AGENT_PROMPT_RENDER_TIMEOUT_MS = 8000
 const AGENT_PROMPT_RENDER_QUIET_MS = 1500
 // Why: Claude and Codex emit show-cursor after accepting bracketed paste.
 const AGENT_PROMPT_RENDER_MARKER = '\x1b[?25h'
+// Why: once the paste has settled, the composer gets this long to show the payload before Enter —
+// a TUI still folding input into the paste would otherwise eat the submit.
+const AGENT_PROMPT_COMPOSER_ECHO_WAIT_MS = 1_500
+const AGENT_PROMPT_COMPOSER_ECHO_POLL_MS = 250
 
 function assertAgentPromptRequestActive(signal?: AbortSignal): void {
   if (signal?.aborted) {
@@ -20734,6 +20744,8 @@ export class OrcaRuntimeService {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      /** Bound on waiting for a booting TUI's composer before the paste; agent default otherwise. */
+      composerReadyTimeoutMs?: number
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const payload = buildAgentPromptPasteBytes(prompt)
@@ -20754,6 +20766,7 @@ export class OrcaRuntimeService {
             handle,
             pty.pty.ptyId,
             generation,
+            prompt,
             payload,
             options
           )
@@ -20777,7 +20790,14 @@ export class OrcaRuntimeService {
     const submits = await this.serializeAgentPromptSubmission(leaf.ptyId, generation, async () => {
       this.assertLiveTerminalHandleTargetsPty(handle, leaf.ptyId!)
       this.assertAgentPromptGeneration(leaf.ptyId!, generation)
-      return await this.writeTerminalAgentPrompt(handle, leaf.ptyId!, generation, payload, options)
+      return await this.writeTerminalAgentPrompt(
+        handle,
+        leaf.ptyId!,
+        generation,
+        prompt,
+        payload,
+        options
+      )
     })
     const bytesWritten = Buffer.byteLength(payload, 'utf8') + submits
     return { handle, accepted: true, bytesWritten }
@@ -21508,13 +21528,30 @@ export class OrcaRuntimeService {
     handle: string,
     ptyId: string,
     generation: number,
+    prompt: string,
     pastePayload: string,
     options: {
       beforeWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
       signal?: AbortSignal
+      composerReadyTimeoutMs?: number
     } = {}
   ): Promise<number> {
+    assertAgentPromptRequestActive(options.signal)
+    this.assertAgentPromptGeneration(ptyId, generation)
+    const initialActivity = this.getAgentPromptActivity(handle, ptyId)
+    this.assertAgentPromptPermissionSafe(initialActivity, initialActivity)
+    // Why: a paste into a TUI that is still booting lands scrambled on its splash screen or parks
+    // unsubmitted, whoever the caller is — the composer is observed before the first byte.
+    const readiness = await this.waitForAgentPromptComposerReady(handle, ptyId, {
+      timeoutMs: options.composerReadyTimeoutMs,
+      signal: options.signal
+    })
+    if (readiness === 'timeout') {
+      console.warn(
+        `[agent-prompt] ${handle}: no composer readiness signal within budget; pasting anyway`
+      )
+    }
     assertAgentPromptRequestActive(options.signal)
     this.assertAgentPromptGeneration(ptyId, generation)
     const permissionBaseline = this.getAgentPromptActivity(handle, ptyId)
@@ -21599,31 +21636,117 @@ export class OrcaRuntimeService {
     assertAgentPromptRequestActive(options.signal)
     this.assertAgentPromptGeneration(ptyId, generation)
     agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-    try {
-      await options.beforeWrite?.(ptyId)
-    } catch (error) {
-      if (options.suffixFailureError) {
-        throw new Error(options.suffixFailureError)
+    // Why: Enter is only worth writing once the screen shows the paste was absorbed; until then the
+    // TUI may still be folding input into it (Codex reads Windows console records) and eats the submit.
+    const composerBeforeSubmit = await this.observeAgentPromptComposerBeforeSubmit(
+      ptyId,
+      generation,
+      prompt,
+      options.signal
+    )
+    const writeSubmit = async (): Promise<void> => {
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+      try {
+        await options.beforeWrite?.(ptyId)
+      } catch (error) {
+        if (options.suffixFailureError) {
+          throw new Error(options.suffixFailureError)
+        }
+        throw error
       }
-      throw error
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+      const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
+      if (!suffixWrote) {
+        throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+      }
     }
-    assertAgentPromptRequestActive(options.signal)
-    this.assertAgentPromptGeneration(ptyId, generation)
     const waitTextCache: AgentPromptWaitTextCache = {}
     const baseline = this.getAgentPromptActivity(handle, ptyId, waitTextCache)
     this.assertAgentPromptPermissionSafe(permissionBaseline, baseline)
-    agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-    const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
-    if (!suffixWrote) {
-      throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
-    }
-    await verifyAgentPromptSubmission({
+    await writeSubmit()
+    const outcome = await verifyAgentPromptSubmission({
       baseline,
       readActivity: () => this.getAgentPromptActivity(handle, ptyId, waitTextCache),
       timeoutMs: resolveAgentPromptEffectTimeoutMs(this.getPtyAgent(ptyId)),
-      signal: options.signal
+      signal: options.signal,
+      composer: {
+        beforeSubmit: composerBeforeSubmit,
+        read: () => this.readAgentPromptComposerVerdict(ptyId, generation, prompt),
+        resubmit: writeSubmit
+      }
     })
-    return 1
+    if (outcome.enterRetries > 0 || outcome.evidence === 'composer-cleared') {
+      console.warn(
+        `[agent-prompt] ${handle}: submission proven by ${outcome.evidence} after ${outcome.enterRetries} extra Enter(s)`
+      )
+    }
+    return 1 + outcome.enterRetries
+  }
+
+  /** Why: `terminal wait --for tui-idle` is the caller's gate; this is the paste's own. Any agent
+   *  status, a known ready header, or a stream that has gone quiet means the composer exists; only
+   *  a pane with none of those waits for the agent's composer signal, bounded by the budget. */
+  private async waitForAgentPromptComposerReady(
+    handle: string,
+    ptyId: string,
+    options: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<'evidence' | 'ready' | 'timeout'> {
+    const status = this.getAgentPromptActivity(handle, ptyId).status
+    if (status === 'idle' || status === 'working') {
+      return 'evidence'
+    }
+    if (isKnownReadyPromptPreview(this.getTerminalAgentStatusSnapshot(handle, ptyId).waitText)) {
+      return 'evidence'
+    }
+    const lastOutputAt = this.ptysById.get(ptyId)?.lastOutputAt
+    if (lastOutputAt && Date.now() - lastOutputAt >= TUI_IDLE_QUIESCENCE_MS) {
+      return 'evidence'
+    }
+    const agent = this.getPtyAgent(ptyId)
+    const ready = await this.waitForDraftPasteReadySignal(
+      ptyId,
+      resolveAgentDraftPasteReadySignal(agent),
+      options.timeoutMs ??
+        Math.max(
+          AGENT_PROMPT_COMPOSER_READY_TIMEOUT_MS,
+          resolveDraftPasteReadyTimeoutMs(agent ?? undefined)
+        ),
+      options.signal
+    )
+    return ready ? 'ready' : 'timeout'
+  }
+
+  private async readAgentPromptComposerVerdict(
+    ptyId: string,
+    generation: number,
+    prompt: string
+  ): Promise<AgentPromptComposerVerdict> {
+    const state = await this.readVisibleTerminalState(ptyId)
+    this.assertAgentPromptGeneration(ptyId, generation)
+    return detectAgentPromptComposerVerdict(
+      state ? { lines: state.lines, draft: state.draft } : null,
+      prompt
+    )
+  }
+
+  private async observeAgentPromptComposerBeforeSubmit(
+    ptyId: string,
+    generation: number,
+    prompt: string,
+    signal?: AbortSignal
+  ): Promise<AgentPromptComposerVerdict> {
+    const deadline = Date.now() + AGENT_PROMPT_COMPOSER_ECHO_WAIT_MS
+    let verdict = await this.readAgentPromptComposerVerdict(ptyId, generation, prompt)
+    // Why: only a readable, still-empty composer is worth waiting on; an unreadable screen stays unknown.
+    while (verdict === 'clear' && Date.now() < deadline) {
+      await waitForAgentPromptDelay(AGENT_PROMPT_COMPOSER_ECHO_POLL_MS, signal)
+      verdict = await this.readAgentPromptComposerVerdict(ptyId, generation, prompt)
+    }
+    return verdict
   }
 
   private async serializeAgentPromptSubmission<T>(
@@ -26428,22 +26551,37 @@ export class OrcaRuntimeService {
     return null
   }
 
-  private waitForStartupDraftReady(handle: string, agent: TuiAgent): Promise<string | null> {
+  private async waitForStartupDraftReady(handle: string, agent: TuiAgent): Promise<string | null> {
     const livePty = this.getLivePtyForHandle(handle)
     const ptyId = livePty?.pty.ptyId
     if (!ptyId) {
-      return Promise.resolve(null)
+      return null
     }
-    const readySignal =
-      TUI_AGENT_CONFIG[agent].draftPasteReadySignal ?? 'render-quiet-after-bracketed-paste'
-    return new Promise<string | null>((resolve) => {
+    const ready = await this.waitForDraftPasteReadySignal(
+      ptyId,
+      resolveAgentDraftPasteReadySignal(agent),
+      resolveDraftPasteReadyTimeoutMs(agent)
+    )
+    return ready ? ptyId : null
+  }
+
+  /** Composer readiness from the agent's marker (or quiet window) over the replayed recent output
+   *  plus the live stream; false on the hard timeout or abort. Shared by the startup draft and the
+   *  agent-prompt paste so the two delivery paths cannot drift. */
+  private waitForDraftPasteReadySignal(
+    ptyId: string,
+    readySignal: DraftPasteReadySignal,
+    hardTimeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
       let settled = false
       const scanner = createDraftPasteReadyScanner(readySignal)
       let quietTimer: NodeJS.Timeout | null = null
       let hardTimer: NodeJS.Timeout | null = null
       let unsubscribe: (() => void) | null = null
 
-      const finish = (value: string | null): void => {
+      const finish = (value: boolean): void => {
         if (settled) {
           return
         }
@@ -26454,21 +26592,23 @@ export class OrcaRuntimeService {
         if (hardTimer) {
           clearTimeout(hardTimer)
         }
+        signal?.removeEventListener('abort', onAbort)
         unsubscribe?.()
         resolve(value)
       }
+      const onAbort = (): void => finish(false)
 
       const armQuietTimer = (): void => {
         if (quietTimer) {
           clearTimeout(quietTimer)
         }
-        quietTimer = setTimeout(() => finish(ptyId), BRACKETED_PASTE_QUIET_MS)
+        quietTimer = setTimeout(() => finish(true), BRACKETED_PASTE_QUIET_MS)
       }
 
       const observeData = (data: string): void => {
         const { ready, armQuietTimer: shouldArm } = scanner.observe(data)
         if (ready) {
-          finish(ptyId)
+          finish(true)
           return
         }
         if (shouldArm) {
@@ -26481,7 +26621,15 @@ export class OrcaRuntimeService {
       if (replay) {
         observeData(replay)
       }
-      hardTimer = setTimeout(() => finish(null), resolveDraftPasteReadyTimeoutMs(agent))
+      if (settled) {
+        return
+      }
+      if (signal?.aborted) {
+        finish(false)
+        return
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      hardTimer = setTimeout(() => finish(false), hardTimeoutMs)
     })
   }
 
@@ -42775,7 +42923,27 @@ function findCodexReadyPromptIndex(normalized: string): number | null {
   }
   const readySegment = normalized.slice(headerIndex)
   // Why: Codex prints permissions only in YOLO mode; the stable ready header is OpenAI Codex + model + directory.
-  return readySegment.includes('model:') && readySegment.includes('directory:') ? headerIndex : null
+  // Why last occurrence: a repaint appends the settled row after the booting one in a stacked tail.
+  const modelIndex = readySegment.lastIndexOf('model:')
+  const directoryIndex = readySegment.lastIndexOf('directory:')
+  if (modelIndex === -1 || directoryIndex === -1) {
+    return null
+  }
+  // Why: the same header is painted with `model: loading` / `directory: loading` while Codex boots
+  // and its composer does not take input yet; only settled values are readiness.
+  if (
+    codexHeaderValueIsUnsettled(readySegment, modelIndex + 'model:'.length) ||
+    codexHeaderValueIsUnsettled(readySegment, directoryIndex + 'directory:'.length)
+  ) {
+    return null
+  }
+  return headerIndex
+}
+
+function codexHeaderValueIsUnsettled(segment: string, valueStart: number): boolean {
+  const lineEnd = segment.indexOf('\n', valueStart)
+  const value = segment.slice(valueStart, lineEnd === -1 ? undefined : lineEnd).trim()
+  return value.length === 0 || value.startsWith('loading')
 }
 
 function findAntigravityReadyPromptIndex(normalized: string): number | null {
@@ -43532,6 +43700,13 @@ function isTerminalSendSettlementAgent(
   agent: TuiAgent | null | undefined
 ): agent is 'claude' | 'codex' {
   return agent === 'claude' || agent === 'codex'
+}
+
+function resolveAgentDraftPasteReadySignal(agent: TuiAgent | null): DraftPasteReadySignal {
+  return (
+    (agent ? TUI_AGENT_CONFIG[agent].draftPasteReadySignal : undefined) ??
+    'render-quiet-after-bracketed-paste'
+  )
 }
 
 function findLastCompleteOscTitleRange(data: string): { start: number; end: number } | null {
