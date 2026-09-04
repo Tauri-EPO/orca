@@ -161,6 +161,30 @@ function resolveRefreshRoute(
   }
 }
 
+export type ClaudeOauthRefreshFailure =
+  | 'no-refresh-token'
+  /** The server no longer accepts the refresh token: only a fresh login recovers the account. */
+  | 'invalid-grant'
+  | 'rate-limited'
+  | 'rejected'
+  | 'network'
+
+export type ClaudeOauthRefreshOutcome =
+  | { credentialsJson: string; failure?: undefined }
+  | { credentialsJson: null; failure: ClaudeOauthRefreshFailure }
+
+async function classifyRefreshRejection(res: {
+  status: number
+  json(): Promise<unknown>
+}): Promise<ClaudeOauthRefreshFailure> {
+  if (res.status === 429) {
+    return 'rate-limited'
+  }
+  // Why: RFC 6749 puts the reason in the body; a dead refresh token is 400 invalid_grant.
+  const body = (await res.json().catch(() => null)) as { error?: unknown } | null
+  return body?.error === 'invalid_grant' ? 'invalid-grant' : 'rejected'
+}
+
 /**
  * Refresh the OAuth token for a stored credentials blob.
  *
@@ -173,9 +197,17 @@ export async function refreshClaudeOauthCredentials(
   credentialsJson: string,
   options: ClaudeOauthRefreshOptions = {}
 ): Promise<string | null> {
+  return (await refreshClaudeOauthCredentialsWithOutcome(credentialsJson, options)).credentialsJson
+}
+
+/** Same as refreshClaudeOauthCredentials, but says why a refresh failed. */
+export async function refreshClaudeOauthCredentialsWithOutcome(
+  credentialsJson: string,
+  options: ClaudeOauthRefreshOptions = {}
+): Promise<ClaudeOauthRefreshOutcome> {
   const refreshToken = readRefreshToken(credentialsJson)
   if (!refreshToken) {
-    return null
+    return { credentialsJson: null, failure: 'no-refresh-token' }
   }
 
   // Why: the token endpoint answers 429 to Chromium's network stack (Electron
@@ -213,12 +245,16 @@ export async function refreshClaudeOauthCredentials(
       // Callers keep the existing credentials on null — a transient 429 just
       // means the still-valid token is reused until the next attempt.
       console.warn(`[claude-oauth-refresh] token endpoint returned ${res.status}`)
+      const failure = await classifyRefreshRejection(res)
       // Why: an unread undici body can crash the process (orca#8695).
       await res.body?.cancel().catch(() => {})
-      return null
+      return { credentialsJson: null, failure }
     }
     const data = (await res.json()) as TokenEndpointResponse
-    return applyRefreshedToken(credentialsJson, data, options.now ?? Date.now())
+    const refreshed = applyRefreshedToken(credentialsJson, data, options.now ?? Date.now())
+    return refreshed
+      ? { credentialsJson: refreshed }
+      : { credentialsJson: null, failure: 'rejected' }
   } catch (error) {
     // Why: undici reports every transport failure as "fetch failed"; the cause carries the real error.
     console.warn(
@@ -226,7 +262,7 @@ export async function refreshClaudeOauthCredentials(
       error instanceof Error ? error.message : error,
       error instanceof Error && error.cause instanceof Error ? error.cause.message : ''
     )
-    return null
+    return { credentialsJson: null, failure: 'network' }
   } finally {
     await dispatcher?.close().catch(() => {})
   }

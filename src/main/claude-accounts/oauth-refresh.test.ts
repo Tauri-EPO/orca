@@ -4,7 +4,8 @@ import {
   isOauthTokenExpiring,
   parseClaudeOauthBlob,
   readRefreshToken,
-  refreshClaudeOauthCredentials
+  refreshClaudeOauthCredentials,
+  refreshClaudeOauthCredentialsWithOutcome
 } from './oauth-refresh'
 
 const { fetchMock, envHttpProxyAgentMock, dispatcherCloseMock } = vi.hoisted(() => ({
@@ -294,5 +295,82 @@ describe('refreshClaudeOauthCredentials', () => {
       })
     ).resolves.toBeNull()
     expect(dispatcherCloseMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('refreshClaudeOauthCredentialsWithOutcome', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('names a missing refresh token', async () => {
+    const outcome = await refreshClaudeOauthCredentialsWithOutcome(
+      credentials({ refreshToken: undefined }),
+      { now: NOW, env: {} }
+    )
+    expect(outcome).toEqual({ credentialsJson: null, failure: 'no-refresh-token' })
+  })
+
+  it('reports invalid_grant so callers can ask for a new login instead of retrying', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      body: { cancel },
+      json: async () => ({ error: 'invalid_grant', error_description: 'Refresh token not found' })
+    })
+    const outcome = await refreshClaudeOauthCredentialsWithOutcome(credentials(), {
+      now: NOW,
+      env: {}
+    })
+    expect(outcome).toEqual({ credentialsJson: null, failure: 'invalid-grant' })
+  })
+
+  it('reports a 429 as rate-limited without reading the body', async () => {
+    const json = vi.fn()
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    fetchMock.mockResolvedValue({ ok: false, status: 429, body: { cancel }, json })
+    const outcome = await refreshClaudeOauthCredentialsWithOutcome(credentials(), {
+      now: NOW,
+      env: {}
+    })
+    expect(outcome).toEqual({ credentialsJson: null, failure: 'rate-limited' })
+    expect(json).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports other rejections and transport failures distinctly', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      json: async () => ({ error: 'invalid_request' })
+    })
+    expect(
+      await refreshClaudeOauthCredentialsWithOutcome(credentials(), { now: NOW, env: {} })
+    ).toEqual({ credentialsJson: null, failure: 'rejected' })
+
+    fetchMock.mockRejectedValueOnce(new Error('fetch failed'))
+    expect(
+      await refreshClaudeOauthCredentialsWithOutcome(credentials(), { now: NOW, env: {} })
+    ).toEqual({ credentialsJson: null, failure: 'network' })
+  })
+
+  it('returns the rotated credentials on success', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'fresh-access', expires_in: 3600 })
+    })
+    const outcome = await refreshClaudeOauthCredentialsWithOutcome(credentials(), {
+      now: NOW,
+      env: {}
+    })
+    expect(outcome.failure).toBeUndefined()
+    expect(parseClaudeOauthBlob(outcome.credentialsJson!)!.accessToken).toBe('fresh-access')
   })
 })

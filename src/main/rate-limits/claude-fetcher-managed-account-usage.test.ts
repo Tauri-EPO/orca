@@ -434,4 +434,113 @@ describe('fetchClaudeRateLimits', () => {
     )
     expect(usageCall?.[1]?.headers?.Authorization).toBe('Bearer fresh-access')
   })
+
+  function writeOwnedInactiveAccount(oauth: Record<string, unknown>): string {
+    tempDir = mkdtempSync(join(tmpdir(), 'orca-claude-fetcher-'))
+    appGetPathMock.mockReturnValue(tempDir)
+    const ownedAuthPath = join(tempDir, 'claude-accounts', 'account-1', 'auth')
+    mkdirSync(ownedAuthPath, { recursive: true })
+    writeFileSync(join(ownedAuthPath, '.orca-managed-claude-auth'), 'account-1\n', 'utf-8')
+    writeFileSync(
+      join(ownedAuthPath, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: oauth }),
+      'utf-8'
+    )
+    return ownedAuthPath
+  }
+
+  it('returns a classified error row instead of throwing when the usage endpoint rejects the token', async () => {
+    setPlatform('linux')
+    const ownedAuthPath = writeOwnedInactiveAccount({
+      accessToken: 'valid-access',
+      refreshToken: 'valid-refresh',
+      expiresAt: Date.now() + 60 * 60 * 1000
+    })
+    netFetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: 'expired' } }), { status: 401 })
+    )
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.session).toBeNull()
+    expect(result.usageMetadata?.failureKind).toBe('stale-token')
+    expect(result.usageMetadata?.attemptedSources).toEqual(['oauth'])
+    expect(tokenFetchMock).not.toHaveBeenCalled()
+  })
+
+  it('marks a 429 as rate-limited with a retry-at instead of a silent gap', async () => {
+    setPlatform('linux')
+    const ownedAuthPath = writeOwnedInactiveAccount({
+      accessToken: 'valid-access',
+      refreshToken: 'valid-refresh',
+      expiresAt: Date.now() + 60 * 60 * 1000
+    })
+    netFetchMock.mockResolvedValueOnce(
+      new Response('', { status: 429, headers: { 'retry-after': '60' } })
+    )
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.usageMetadata?.failureKind).toBe('rate-limited')
+    expect(result.usageMetadata?.retryAtMs).toBeGreaterThan(Date.now())
+  })
+
+  it('asks for a new login when the refresh token is dead, without spending a usage call', async () => {
+    setPlatform('linux')
+    const ownedAuthPath = writeOwnedInactiveAccount({
+      accessToken: 'stale-access',
+      refreshToken: 'dead-refresh',
+      expiresAt: Date.now() - 60_000
+    })
+    tokenFetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      body: { cancel: async () => undefined },
+      json: async () => ({ error: 'invalid_grant' })
+    })
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.usageMetadata?.failureKind).toBe('reauth-required')
+    expect(result.usageMetadata?.authProvenance).toBe('managed:account-1')
+    expect(netFetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still tries the stored token when the refresh fails transiently', async () => {
+    setPlatform('linux')
+    const ownedAuthPath = writeOwnedInactiveAccount({
+      accessToken: 'still-accepted',
+      refreshToken: 'valid-refresh',
+      expiresAt: Date.now() - 60_000
+    })
+    tokenFetchMock.mockRejectedValueOnce(new Error('fetch failed'))
+    netFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ five_hour: { utilization: 12 }, seven_day: { utilization: 34 } }),
+        {
+          status: 200
+        }
+      )
+    )
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('ok')
+    expect(netFetchMock.mock.calls[0]?.[1]?.headers?.Authorization).toBe('Bearer still-accepted')
+  })
 })

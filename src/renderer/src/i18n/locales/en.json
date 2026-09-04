@@ -3513,6 +3513,10 @@
       },
       "status": {
         "bar": {
+          "InlineProviderUsage": {
+            "4539756024": "Usage temporarily unavailable",
+            "067e35e70d": "Usage unavailable"
+          },
           "PetStatusSegment": {
             "3668339495": "Remove {{value0}}",
             "cd8c6c654c": "Pet settings…",
