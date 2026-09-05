@@ -44,3 +44,24 @@ export function expireClaudeUsageWindows(
 export function hasClaudeUsageWindows(limits: ProviderRateLimits | null | undefined): boolean {
   return Boolean(limits && (limits.session || limits.weekly || limits.fableWeekly))
 }
+
+/** Earliest future reset among the live windows, or null when nothing is left to expire. */
+export function nextClaudeUsageWindowReset(
+  limits: ProviderRateLimits,
+  now: number = Date.now()
+): number | null {
+  let next: number | null = null
+  for (const window of [limits.session, limits.weekly, limits.fableWeekly]) {
+    if (!isClaudeUsageWindowLive(window, limits.updatedAt, now)) {
+      continue
+    }
+    const reset =
+      typeof window.resetsAt === 'number' && Number.isFinite(window.resetsAt)
+        ? window.resetsAt
+        : limits.updatedAt + window.windowMinutes * 60_000
+    if (next === null || reset < next) {
+      next = reset
+    }
+  }
+  return next
+}

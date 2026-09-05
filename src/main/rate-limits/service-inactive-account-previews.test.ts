@@ -289,6 +289,35 @@ describe('RateLimitService', () => {
     }
   })
 
+  it('drops last-known windows when the account needs a new login, so the row can say so', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-17T12:00:00Z'))
+    try {
+      const service = new RateLimitService()
+      service.setInactiveClaudeAccountsResolver(() => [
+        { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+      ])
+      const fresh = okProvider('claude', 33, Date.now())
+      fresh.session = { ...fresh.session!, resetsAt: Date.now() + 3 * 60 * 60_000 }
+      vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce(fresh)
+      await service.fetchInactiveClaudeAccountsOnOpen()
+
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce({
+        ...errorProvider('claude', 'Sign in to this account again'),
+        usageMetadata: { failureKind: 'reauth-required' }
+      })
+      await service.fetchInactiveClaudeAccountsOnOpen()
+
+      const row = service.getState().inactiveClaudeAccounts[0]
+      expect(row?.rateLimits?.status).toBe('error')
+      expect(row?.rateLimits?.session).toBeNull()
+      expect(row?.rateLimits?.usageMetadata?.failureKind).toBe('reauth-required')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops showing an inactive Claude window once it has reset, even without a new fetch', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-17T12:00:00Z'))
@@ -305,11 +334,17 @@ describe('RateLimitService', () => {
         90
       )
 
+      const published: number[] = []
+      service.onStateChange((state) =>
+        published.push(state.inactiveClaudeAccounts[0]?.rateLimits?.session?.usedPercent ?? -1)
+      )
       await vi.advanceTimersByTimeAsync(11 * 60_000)
 
       const row = service.getState().inactiveClaudeAccounts[0]
       expect(row?.rateLimits?.status).toBe('ok')
       expect(row?.rateLimits?.session).toBeNull()
+      // The reset itself published the null window; no fetch or user action was needed.
+      expect(published).toContain(-1)
     } finally {
       vi.useRealTimers()
     }

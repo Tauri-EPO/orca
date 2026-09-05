@@ -1,5 +1,6 @@
 import type { ProviderRateLimits } from '../../../shared/rate-limit-types'
 import { fetchManagedAccountUsage } from '../claude-fetcher'
+import { nextClaudeUsageWindowReset } from '../claude-usage-window-expiry'
 import { fetchCodexRateLimits } from '../codex-fetcher'
 import { RateLimitServicePolling } from './service-polling'
 import {
@@ -25,6 +26,46 @@ function inactiveAccountFetchFailure(
 }
 
 export abstract class RateLimitServiceInactiveAccounts extends RateLimitServicePolling {
+  private inactiveClaudeExpiryTimer: ReturnType<typeof setTimeout> | null = null
+
+  /**
+   * Why: the renderer only sees a reset window as unknown when state is published, and
+   * background polling stays quiet while the window is unfocused; publish once at the next reset.
+   */
+  protected scheduleInactiveClaudeExpiryPush(): void {
+    if (this.inactiveClaudeExpiryTimer) {
+      clearTimeout(this.inactiveClaudeExpiryTimer)
+      this.inactiveClaudeExpiryTimer = null
+    }
+    const now = Date.now()
+    let nextReset: number | null = null
+    for (const limits of this.inactiveClaudeCache.values()) {
+      const reset = nextClaudeUsageWindowReset(limits, now)
+      if (reset !== null && (nextReset === null || reset < nextReset)) {
+        nextReset = reset
+      }
+    }
+    if (nextReset === null) {
+      return
+    }
+    this.inactiveClaudeExpiryTimer = setTimeout(
+      () => {
+        this.inactiveClaudeExpiryTimer = null
+        this.pushToRenderer()
+        this.scheduleInactiveClaudeExpiryPush()
+      },
+      Math.max(1_000, nextReset - now + 1_000)
+    )
+    this.inactiveClaudeExpiryTimer.unref?.()
+  }
+
+  protected clearInactiveClaudeExpiryPush(): void {
+    if (this.inactiveClaudeExpiryTimer) {
+      clearTimeout(this.inactiveClaudeExpiryTimer)
+      this.inactiveClaudeExpiryTimer = null
+    }
+  }
+
   async fetchInactiveClaudeAccountsOnOpen(): Promise<void> {
     if (Date.now() - this.lastInactiveClaudeFetchAt < INACTIVE_FETCH_DEBOUNCE_MS) {
       return
@@ -110,6 +151,7 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
       if (!signal.aborted && fetchGeneration === this.inactiveClaudeAccountsGeneration) {
         this.lastInactiveClaudeFetchAt = Date.now()
       }
+      this.scheduleInactiveClaudeExpiryPush()
     } finally {
       this.finishFetchCycle(controller)
     }

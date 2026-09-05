@@ -1,3 +1,4 @@
+import type { UsageRateLimitFailureKind } from '../../../shared/rate-limit-types'
 import { expireClaudeUsageWindows, hasClaudeUsageWindows } from '../claude-usage-window-expiry'
 import { RateLimitServiceFetchControl } from './service-fetch-control'
 import {
@@ -7,6 +8,11 @@ import {
   type ActiveRateLimitProvider,
   type ProviderRateLimits
 } from './service-types'
+
+const LOGIN_REQUIRED_FAILURE_KINDS: ReadonlySet<UsageRateLimitFailureKind> = new Set([
+  'reauth-required',
+  'missing-credentials'
+])
 
 export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetchControl {
   protected applyStalePolicy(
@@ -76,6 +82,13 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
   ): ProviderRateLimits {
     if (fresh.status === 'ok' || fresh.status === 'unavailable' || !previous) {
       return this.applyStalePolicy(fresh, previous)
+    }
+    // Why: a login that needs the user is not transient; old bars would hide the "sign in" row for days.
+    if (
+      fresh.usageMetadata?.failureKind &&
+      LOGIN_REQUIRED_FAILURE_KINDS.has(fresh.usageMetadata.failureKind)
+    ) {
+      return fresh
     }
     const kept = expireClaudeUsageWindows(previous)
     if (!hasClaudeUsageWindows(kept)) {
