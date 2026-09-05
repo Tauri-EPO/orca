@@ -62,6 +62,25 @@ describe('useStatusBarController refresh', () => {
     expect(mocks.fetchInactiveCodexAccountUsage).toHaveBeenCalledTimes(1)
   })
 
+  it('does not hold the spinner on the staggered inactive probes', async () => {
+    let releaseCodexProbe: () => void = () => {}
+    mocks.fetchInactiveCodexAccountUsage.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCodexProbe = resolve
+        })
+    )
+    const { result } = renderHook(() => useStatusBarController(false))
+
+    await act(async () => {
+      await result.current!.handleRefresh()
+    })
+
+    // Active providers are done, so refreshing is over even though the Codex probe is still running.
+    expect(result.current!.isRefreshing).toBe(false)
+    releaseCodexProbe()
+  })
+
   it('leaves inactive-account caches alone while a remote environment owns the accounts', async () => {
     useAppStore.setState({
       settings: { ...getDefaultSettings('/tmp'), activeRuntimeEnvironmentId: 'env-1' }

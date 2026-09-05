@@ -89,16 +89,15 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     }
     setIsRefreshing(true)
     try {
+      // Why: saved-but-inactive accounts refresh too (#14833), but fire-and-forget like the
+      // switcher does: the Codex probes are staggered per account and must not hold the spinner.
+      // The service's on-open debounce bounds them; remote-owned accounts have no local cache to fill.
+      if (!hasActiveRuntimeEnvironment) {
+        void fetchInactiveClaudeAccountUsage()
+        void fetchInactiveCodexAccountUsage()
+      }
       // Why: re-run PATH detection so a freshly-installed/removed CLI's bar appears/hides without restarting Orca.
-      // Saved-but-inactive accounts refresh too (#14833); the service's on-open debounce still bounds the probes,
-      // and remote-owned accounts have no local cache to fill.
-      await Promise.all([
-        refreshRateLimits(),
-        refreshDetectedAgents(),
-        ...(hasActiveRuntimeEnvironment
-          ? []
-          : [fetchInactiveClaudeAccountUsage(), fetchInactiveCodexAccountUsage()])
-      ])
+      await Promise.all([refreshRateLimits(), refreshDetectedAgents()])
     } finally {
       if (mountedRef.current) {
         setIsRefreshing(false)
