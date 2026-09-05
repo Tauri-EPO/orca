@@ -80,6 +80,9 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
   }, [])
 
   const refreshDetectedAgents = useAppStore((s) => s.refreshDetectedAgents)
+  const fetchInactiveClaudeAccountUsage = useAppStore((s) => s.fetchInactiveClaudeAccountUsage)
+  const fetchInactiveCodexAccountUsage = useAppStore((s) => s.fetchInactiveCodexAccountUsage)
+  const hasActiveRuntimeEnvironment = Boolean(settings?.activeRuntimeEnvironmentId?.trim())
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) {
       return
@@ -87,13 +90,28 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     setIsRefreshing(true)
     try {
       // Why: re-run PATH detection so a freshly-installed/removed CLI's bar appears/hides without restarting Orca.
-      await Promise.all([refreshRateLimits(), refreshDetectedAgents()])
+      // Saved-but-inactive accounts refresh too (#14833); the service's on-open debounce still bounds the probes,
+      // and remote-owned accounts have no local cache to fill.
+      await Promise.all([
+        refreshRateLimits(),
+        refreshDetectedAgents(),
+        ...(hasActiveRuntimeEnvironment
+          ? []
+          : [fetchInactiveClaudeAccountUsage(), fetchInactiveCodexAccountUsage()])
+      ])
     } finally {
       if (mountedRef.current) {
         setIsRefreshing(false)
       }
     }
-  }, [isRefreshing, refreshRateLimits, refreshDetectedAgents])
+  }, [
+    isRefreshing,
+    refreshRateLimits,
+    refreshDetectedAgents,
+    fetchInactiveClaudeAccountUsage,
+    fetchInactiveCodexAccountUsage,
+    hasActiveRuntimeEnvironment
+  ])
 
   if (!statusBarVisible) {
     return null
