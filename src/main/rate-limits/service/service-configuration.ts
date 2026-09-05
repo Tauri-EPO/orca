@@ -109,6 +109,7 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
     this.clearQueuedFetches()
     this.inactiveClaudeFetching.clear()
     this.inactiveCodexFetching.clear()
+    this.clearInactiveClaudeExpiryPush()
     this.resolveAndClearFetchIdleWaiters()
     this.stopTimer()
     this.clearDeferredStartupRefresh()
