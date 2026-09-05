@@ -78,6 +78,12 @@ export function isOauthTokenExpiring(credentialsJson: string, now: number = Date
   return now + OAUTH_EXPIRY_BUFFER_MS >= expiresAt
 }
 
+/** Whether the stored access token is already past its expiry (no refresh buffer). */
+export function isOauthTokenExpired(credentialsJson: string, now: number = Date.now()): boolean {
+  const expiresAt = parseClaudeOauthBlob(credentialsJson)?.expiresAt
+  return typeof expiresAt === 'number' && Number.isFinite(expiresAt) && now >= expiresAt
+}
+
 /**
  * Merge a token-endpoint response into the stored credentials, returning the
  * updated credentials JSON. Preserves every field the caller already had
@@ -168,6 +174,8 @@ export type ClaudeOauthRefreshFailure =
   | 'rate-limited'
   | 'rejected'
   | 'network'
+  /** A SOCKS proxy is configured; the request was not sent rather than bypass it. */
+  | 'unsupported-proxy'
 
 export type ClaudeOauthRefreshOutcome =
   | { credentialsJson: string; failure?: undefined }
@@ -219,7 +227,7 @@ export async function refreshClaudeOauthCredentialsWithOutcome(
     console.warn(
       `[claude-oauth-refresh] ${route.protocol} proxies are not supported for token refresh; skipping`
     )
-    return null
+    return { credentialsJson: null, failure: 'unsupported-proxy' }
   }
   const dispatcher = route.kind === 'proxy' ? route.dispatcher : undefined
   try {

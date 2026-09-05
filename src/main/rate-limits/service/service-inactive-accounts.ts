@@ -19,7 +19,8 @@ function inactiveAccountFetchFailure(
     updatedAt: Date.now(),
     error: error instanceof Error ? error.message : String(error || 'Unknown error'),
     status: 'error',
-    usageMetadata: { failureKind: 'network' }
+    // Why: only credential/keychain reads escape the fetcher unclassified; network and HTTP failures are classified inside it.
+    usageMetadata: { failureKind: 'unknown' }
   }
 }
 

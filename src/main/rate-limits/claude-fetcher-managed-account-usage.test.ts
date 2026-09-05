@@ -518,12 +518,37 @@ describe('fetchClaudeRateLimits', () => {
     expect(netFetchMock).not.toHaveBeenCalled()
   })
 
-  it('still tries the stored token when the refresh fails transiently', async () => {
+  it('reports the refresh failure instead of sending an already-expired token', async () => {
+    setPlatform('linux')
+    const ownedAuthPath = writeOwnedInactiveAccount({
+      accessToken: 'expired-access',
+      refreshToken: 'valid-refresh',
+      expiresAt: Date.now() - 60_000
+    })
+    tokenFetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      body: { cancel: async () => undefined },
+      json: async () => ({})
+    })
+
+    const result = await fetchManagedAccountUsage({
+      id: 'account-1',
+      managedAuthPath: ownedAuthPath
+    })
+
+    expect(result.status).toBe('error')
+    expect(result.usageMetadata?.failureKind).toBe('rate-limited')
+    expect(netFetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still tries the stored token when the refresh fails transiently inside the expiry buffer', async () => {
     setPlatform('linux')
     const ownedAuthPath = writeOwnedInactiveAccount({
       accessToken: 'still-accepted',
       refreshToken: 'valid-refresh',
-      expiresAt: Date.now() - 60_000
+      // Within the 5-minute refresh buffer, but not expired yet.
+      expiresAt: Date.now() + 2 * 60_000
     })
     tokenFetchMock.mockRejectedValueOnce(new Error('fetch failed'))
     netFetchMock.mockResolvedValueOnce(

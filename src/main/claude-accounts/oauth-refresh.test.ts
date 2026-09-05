@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   applyRefreshedToken,
   isOauthTokenExpiring,
+  isOauthTokenExpired,
   parseClaudeOauthBlob,
   readRefreshToken,
   refreshClaudeOauthCredentials,
@@ -86,6 +87,14 @@ describe('isOauthTokenExpiring', () => {
 
   it('is false for credentials without an oauth block', () => {
     expect(isOauthTokenExpiring('{}', NOW)).toBe(false)
+  })
+})
+
+describe('isOauthTokenExpired', () => {
+  it('is false inside the refresh buffer and true only past expiry', () => {
+    expect(isOauthTokenExpired(credentials({ expiresAt: NOW + 2 * 60 * 1000 }), NOW)).toBe(false)
+    expect(isOauthTokenExpired(credentials({ expiresAt: NOW - 1 }), NOW)).toBe(true)
+    expect(isOauthTokenExpired(credentials({ expiresAt: undefined }), NOW)).toBe(false)
   })
 })
 
@@ -359,6 +368,15 @@ describe('refreshClaudeOauthCredentialsWithOutcome', () => {
     expect(
       await refreshClaudeOauthCredentialsWithOutcome(credentials(), { now: NOW, env: {} })
     ).toEqual({ credentialsJson: null, failure: 'network' })
+  })
+
+  it('reports a SOCKS proxy as unsupported without sending the request', async () => {
+    const outcome = await refreshClaudeOauthCredentialsWithOutcome(credentials(), {
+      now: NOW,
+      env: { ALL_PROXY: 'socks5://proxy.corp:1080' }
+    })
+    expect(outcome).toEqual({ credentialsJson: null, failure: 'unsupported-proxy' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('returns the rotated credentials on success', async () => {

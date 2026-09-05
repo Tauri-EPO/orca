@@ -1,7 +1,9 @@
-import type { ProviderRateLimits } from '../../shared/rate-limit-types'
+import type { ProviderRateLimits, UsageRateLimitFailureKind } from '../../shared/rate-limit-types'
 import {
+  isOauthTokenExpired,
   isOauthTokenExpiring,
-  refreshClaudeOauthCredentialsWithOutcome
+  refreshClaudeOauthCredentialsWithOutcome,
+  type ClaudeOauthRefreshFailure
 } from '../claude-accounts/oauth-refresh'
 import {
   readClaudeManagedCredentialsJson,
@@ -33,6 +35,30 @@ function noClaudeManagedCredentialsResult(account: InactiveClaudeAccount): Provi
   return makeClaudeUsageResult('error', 'No credentials', {
     attemptedSources: [],
     failureKind: 'missing-credentials',
+    authProvenance: managedAuthProvenance(account)
+  })
+}
+
+const REFRESH_FAILURE_KINDS: Record<
+  Exclude<ClaudeOauthRefreshFailure, 'invalid-grant'>,
+  UsageRateLimitFailureKind
+> = {
+  'no-refresh-token': 'refreshable-credentials-without-token',
+  'rate-limited': 'rate-limited',
+  rejected: 'server',
+  network: 'network',
+  'unsupported-proxy': 'network'
+}
+
+function refreshFailedResult(
+  account: InactiveClaudeAccount,
+  failure: Exclude<ClaudeOauthRefreshFailure, 'invalid-grant'>
+): ProviderRateLimits {
+  return makeClaudeUsageResult('error', `Token refresh failed (${failure})`, {
+    source: 'oauth',
+    attemptedSources: ['oauth'],
+    failureKind: REFRESH_FAILURE_KINDS[failure],
+    credentialSource: 'credentials-file',
     authProvenance: managedAuthProvenance(account)
   })
 }
@@ -83,8 +109,11 @@ export async function fetchInactiveClaudeAccountUsage(
       oauthCredentials = parseClaudeOAuthCredentialsJson(credentialsJson, 'credentials-file')
     } else if (refresh.failure === 'invalid-grant') {
       return reauthRequiredResult(account)
+    } else if (refresh.failure && isOauthTokenExpired(credentialsJson)) {
+      // Why: an already-expired token can only turn into a 401; report the refresh failure and let the next open retry.
+      return refreshFailedResult(account, refresh.failure)
     }
-    // Why: any other refresh failure is transient; the stored token may still be accepted.
+    // Why: inside the refresh buffer the stored token is still accepted; a transient refresh failure just means we use it once more.
   }
 
   const token = oauthCredentials.token

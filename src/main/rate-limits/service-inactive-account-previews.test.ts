@@ -225,7 +225,7 @@ describe('RateLimitService', () => {
     expect(row?.isFetching).toBe(false)
     expect(row?.rateLimits?.status).toBe('error')
     expect(row?.rateLimits?.error).toBe('keychain locked')
-    expect(row?.rateLimits?.usageMetadata?.failureKind).toBe('network')
+    expect(row?.rateLimits?.usageMetadata?.failureKind).toBe('unknown')
   })
 
   it('keeps the last known windows on a thrown inactive Claude fetch', async () => {

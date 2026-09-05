@@ -96,11 +96,11 @@ export function unavailableUsageLabel(limits: ProviderRateLimits): string {
   }
   if (failureKind === 'rate-limited') {
     return translate(
-      'auto.components.status.bar.InlineProviderUsage.4539756024',
+      'components.status.bar.inlineUsage.temporarilyUnavailable',
       'Usage temporarily unavailable'
     )
   }
-  return translate('auto.components.status.bar.InlineProviderUsage.067e35e70d', 'Usage unavailable')
+  return translate('components.status.bar.inlineUsage.unavailable', 'Usage unavailable')
 }
 
 export function isUnavailableInactiveUsage(limits: ProviderRateLimits | null | undefined): boolean {
