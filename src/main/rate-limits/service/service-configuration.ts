@@ -1,4 +1,5 @@
 import type { BrowserWindow } from 'electron'
+import { expireClaudeUsageWindows } from '../claude-usage-window-expiry'
 import { hasMiniMaxSessionCookie } from '../../minimax/minimax-cookie-store'
 import { RateLimitServiceAccountRefresh } from './service-account-refresh'
 import {
@@ -126,9 +127,11 @@ export abstract class RateLimitServiceConfiguration extends RateLimitServiceAcco
       grokAuthConfigured: this.grokAuthConfigured,
       claudeTarget: this.claudeFetchTarget,
       codexTarget: this.codexFetchTarget,
+      // Why: a last-known window is only shown while it has not reset yet (#14833).
       inactiveClaudeAccounts: this.buildInactiveArray(
         this.inactiveClaudeCache,
-        this.inactiveClaudeFetching
+        this.inactiveClaudeFetching,
+        expireClaudeUsageWindows
       ),
       inactiveCodexAccounts: this.buildInactiveArray(
         this.inactiveCodexCache,

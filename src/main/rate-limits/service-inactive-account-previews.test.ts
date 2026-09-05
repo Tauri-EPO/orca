@@ -255,6 +255,66 @@ describe('RateLimitService', () => {
     }
   })
 
+  it('keeps an inactive Claude window past 30 minutes while its reset is still ahead', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-17T12:00:00Z'))
+    try {
+      const service = new RateLimitService()
+      service.setInactiveClaudeAccountsResolver(() => [
+        { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+      ])
+      const fresh = okProvider('claude', 33, Date.now())
+      fresh.session = { ...fresh.session!, resetsAt: Date.now() + 3 * 60 * 60_000 }
+      fresh.weekly = {
+        usedPercent: 12,
+        windowMinutes: 10080,
+        resetsAt: Date.now() + 60 * 60_000,
+        resetDescription: null
+      }
+      vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce(fresh)
+      await service.fetchInactiveClaudeAccountsOnOpen()
+
+      // Two hours later: the active bar's 30-minute policy would have dropped this; the weekly
+      // window reset an hour ago, the session window has an hour left.
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+      vi.mocked(fetchManagedAccountUsage).mockRejectedValueOnce(new Error('offline'))
+      await service.fetchInactiveClaudeAccountsOnOpen()
+
+      const row = service.getState().inactiveClaudeAccounts.find((a) => a.accountId === 'account-1')
+      expect(row?.rateLimits?.status).toBe('error')
+      expect(row?.rateLimits?.session?.usedPercent).toBe(33)
+      expect(row?.rateLimits?.weekly).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops showing an inactive Claude window once it has reset, even without a new fetch', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-17T12:00:00Z'))
+    try {
+      const service = new RateLimitService()
+      service.setInactiveClaudeAccountsResolver(() => [
+        { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+      ])
+      const fresh = okProvider('claude', 90, Date.now())
+      fresh.session = { ...fresh.session!, resetsAt: Date.now() + 10 * 60_000 }
+      vi.mocked(fetchManagedAccountUsage).mockResolvedValueOnce(fresh)
+      await service.fetchInactiveClaudeAccountsOnOpen()
+      expect(service.getState().inactiveClaudeAccounts[0]?.rateLimits?.session?.usedPercent).toBe(
+        90
+      )
+
+      await vi.advanceTimersByTimeAsync(11 * 60_000)
+
+      const row = service.getState().inactiveClaudeAccounts[0]
+      expect(row?.rateLimits?.status).toBe('ok')
+      expect(row?.rateLimits?.session).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not start overlapping inactive Claude preview fetches', async () => {
     const service = new RateLimitService()
     const accountFetch = deferred<ProviderRateLimits>()

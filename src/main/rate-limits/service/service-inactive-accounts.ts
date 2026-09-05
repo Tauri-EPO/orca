@@ -79,7 +79,10 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
             continue
           }
           const cached = this.inactiveClaudeCache.get(account.id) ?? null
-          this.inactiveClaudeCache.set(account.id, this.applyStalePolicy(fresh, cached))
+          this.inactiveClaudeCache.set(
+            account.id,
+            this.applyInactiveClaudeStalePolicy(fresh, cached)
+          )
         } catch (error) {
           // Why: per-account try/catch keeps one Keychain/network error from aborting the remaining accounts in the batch.
           if (
@@ -93,7 +96,10 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
             const cached = this.inactiveClaudeCache.get(account.id) ?? null
             this.inactiveClaudeCache.set(
               account.id,
-              this.applyStalePolicy(inactiveAccountFetchFailure('claude', error), cached)
+              this.applyInactiveClaudeStalePolicy(
+                inactiveAccountFetchFailure('claude', error),
+                cached
+              )
             )
           }
         }
