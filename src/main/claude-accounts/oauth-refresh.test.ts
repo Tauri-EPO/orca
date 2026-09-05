@@ -231,18 +231,40 @@ describe('refreshClaudeOauthCredentials', () => {
     })
   })
 
-  it('connects directly (with a warning) when the proxy is SOCKS', async () => {
+  it('refuses to bypass a SOCKS proxy: no request, null result, warning', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    fetchMock.mockResolvedValue(okResponse())
 
-    await refreshClaudeOauthCredentials(credentials(), {
+    const result = await refreshClaudeOauthCredentials(credentials(), {
       now: NOW,
       env: { ALL_PROXY: 'socks5://proxy.corp:1080' }
     })
 
+    expect(result).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(envHttpProxyAgentMock).not.toHaveBeenCalled()
-    expect(fetchMock.mock.calls[0][1].dispatcher).toBeUndefined()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('proxy protocol not supported'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('socks5: proxies are not supported'))
+    warn.mockRestore()
+  })
+
+  it('settles as soon as the caller aborts, without waiting for the request timeout', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const controller = new AbortController()
+    fetchMock.mockImplementation(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        })
+    )
+
+    const pending = refreshClaudeOauthCredentials(credentials(), {
+      now: NOW,
+      env: NO_PROXY_ENV,
+      signal: controller.signal
+    })
+    controller.abort()
+
+    await expect(pending).resolves.toBeNull()
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
     warn.mockRestore()
   })
 

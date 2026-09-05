@@ -121,37 +121,44 @@ export type ClaudeOauthRefreshOptions = {
   networkProxySettings?: NetworkProxySettings | null
   env?: Record<string, string | undefined>
   now?: number
+  /** Caller cancellation; the request also carries its own timeout. */
+  signal?: AbortSignal
 }
 
 const NODE_PROXY_PROTOCOLS = new Set(['http:', 'https:'])
 
+type RefreshRoute =
+  | { kind: 'direct' }
+  | { kind: 'proxy'; dispatcher: Dispatcher }
+  /** A proxy is configured but undici cannot tunnel through it; never bypass it. */
+  | { kind: 'unsupported-proxy'; protocol: string }
+
 /**
  * Proxy for the token request, resolved the way child processes get theirs:
  * Orca's configured proxy wins over the shell's, and its bypass list replaces
- * NO_PROXY. Returns undefined for a direct connection.
+ * NO_PROXY.
  */
-function resolveRefreshDispatcher(
+function resolveRefreshRoute(
   settings: NetworkProxySettings | null | undefined,
   env: Record<string, string | undefined>
-): Dispatcher | undefined {
+): RefreshRoute {
   const merged = { ...env, ...buildConfiguredProxyEnv(settings) }
   const proxy = getProxyUrlFromEnvironment(merged)
   if (!proxy.ok || !proxy.value) {
-    return undefined
+    return { kind: 'direct' }
   }
-  if (!NODE_PROXY_PROTOCOLS.has(new URL(proxy.value).protocol)) {
-    // Why: undici tunnels through HTTP proxies only; a SOCKS proxy would
-    // throw before the request, so go direct rather than fail the refresh.
-    console.warn(
-      '[claude-oauth-refresh] proxy protocol not supported for token refresh; connecting directly'
-    )
-    return undefined
+  const protocol = new URL(proxy.value).protocol
+  if (!NODE_PROXY_PROTOCOLS.has(protocol)) {
+    return { kind: 'unsupported-proxy', protocol }
   }
-  return new EnvHttpProxyAgent({
-    httpProxy: proxy.value,
-    httpsProxy: proxy.value,
-    noProxy: merged.NO_PROXY ?? merged.no_proxy ?? ''
-  })
+  return {
+    kind: 'proxy',
+    dispatcher: new EnvHttpProxyAgent({
+      httpProxy: proxy.value,
+      httpsProxy: proxy.value,
+      noProxy: merged.NO_PROXY ?? merged.no_proxy ?? ''
+    })
+  }
 }
 
 /**
@@ -174,10 +181,15 @@ export async function refreshClaudeOauthCredentials(
   // Why: the token endpoint answers 429 to Chromium's network stack (Electron
   // net.fetch) while the same request from Node succeeds (orca#18716), so the
   // refresh goes through Node's stack like the `claude` CLI's own refresh.
-  const dispatcher = resolveRefreshDispatcher(
-    options.networkProxySettings,
-    options.env ?? process.env
-  )
+  const route = resolveRefreshRoute(options.networkProxySettings, options.env ?? process.env)
+  if (route.kind === 'unsupported-proxy') {
+    // Why: connecting directly would leave the configured egress route; keeping the old token is the safer failure.
+    console.warn(
+      `[claude-oauth-refresh] ${route.protocol} proxies are not supported for token refresh; skipping`
+    )
+    return null
+  }
+  const dispatcher = route.kind === 'proxy' ? route.dispatcher : undefined
   try {
     // Why: the `claude` CLI posts grant_type=refresh_token as
     // application/x-www-form-urlencoded with the public client id.
@@ -189,7 +201,9 @@ export async function refreshClaudeOauthCredentials(
         refresh_token: refreshToken,
         client_id: OAUTH_CLIENT_ID
       }).toString(),
-      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(REFRESH_TIMEOUT_MS)])
+        : AbortSignal.timeout(REFRESH_TIMEOUT_MS),
       ...(dispatcher ? { dispatcher } : {})
     })
     if (!res.ok) {
