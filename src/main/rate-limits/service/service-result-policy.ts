@@ -1,3 +1,4 @@
+import { expireClaudeUsageWindows, hasClaudeUsageWindows } from '../claude-usage-window-expiry'
 import { RateLimitServiceFetchControl } from './service-fetch-control'
 import {
   MAX_ACTIVE_FAILURE_STREAK,
@@ -61,6 +62,33 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
         ...fresh.usageMetadata,
         lastSuccessfulSource:
           previous.usageMetadata?.lastSuccessfulSource ?? previous.usageMetadata?.source
+      }
+    }
+  }
+
+  /**
+   * Stale policy for saved-but-inactive Claude accounts. Nobody is using the account, so its
+   * last-known windows stay valid until each one resets, not for the active bar's 30 minutes.
+   */
+  protected applyInactiveClaudeStalePolicy(
+    fresh: ProviderRateLimits,
+    previous: ProviderRateLimits | null
+  ): ProviderRateLimits {
+    if (fresh.status === 'ok' || fresh.status === 'unavailable' || !previous) {
+      return this.applyStalePolicy(fresh, previous)
+    }
+    const kept = expireClaudeUsageWindows(previous)
+    if (!hasClaudeUsageWindows(kept)) {
+      return fresh
+    }
+    return {
+      ...kept,
+      error: fresh.error,
+      status: 'error',
+      usageMetadata: {
+        ...kept.usageMetadata,
+        ...fresh.usageMetadata,
+        lastSuccessfulSource: kept.usageMetadata?.lastSuccessfulSource ?? kept.usageMetadata?.source
       }
     }
   }
