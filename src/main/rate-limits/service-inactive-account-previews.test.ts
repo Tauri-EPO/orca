@@ -495,4 +495,32 @@ describe('RateLimitService', () => {
       }
     ])
   })
+
+  it('keeps the switch-time snapshot when a stale same-id fetch throws', async () => {
+    const service = new RateLimitService()
+    const accountFetch = deferred<ProviderRateLimits>()
+    service.setInactiveClaudeAccountsResolver(() => [
+      { id: 'account-1', managedAuthPath: '/tmp/account-1/auth' }
+    ])
+    service.setClaudeAuthPreparationResolver(async () => ({
+      configDir: '/tmp/.claude',
+      envPatch: {},
+      stripAuthEnv: false,
+      provenance: 'system'
+    }))
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 7))
+    await service.refresh()
+    vi.mocked(fetchManagedAccountUsage).mockReturnValueOnce(accountFetch.promise)
+
+    const fetchOnOpen = service.fetchInactiveClaudeAccountsOnOpen()
+    await Promise.resolve()
+
+    await service.refreshForClaudeAccountChange('account-1')
+    accountFetch.reject(new Error('offline'))
+    await fetchOnOpen
+
+    const row = service.getState().inactiveClaudeAccounts.find((a) => a.accountId === 'account-1')
+    expect(row?.isFetching).toBe(false)
+    expect(row?.rateLimits?.session?.usedPercent).toBe(7)
+  })
 })

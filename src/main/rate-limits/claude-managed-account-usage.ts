@@ -39,11 +39,13 @@ function noClaudeManagedCredentialsResult(account: InactiveClaudeAccount): Provi
   })
 }
 
-const REFRESH_FAILURE_KINDS: Record<
-  Exclude<ClaudeOauthRefreshFailure, 'invalid-grant'>,
-  UsageRateLimitFailureKind
-> = {
-  'no-refresh-token': 'refreshable-credentials-without-token',
+/** Refresh failures a later poll can still recover from; the excluded ones need a new login. */
+type TransientRefreshFailure = Exclude<
+  ClaudeOauthRefreshFailure,
+  'invalid-grant' | 'no-refresh-token'
+>
+
+const REFRESH_FAILURE_KINDS: Record<TransientRefreshFailure, UsageRateLimitFailureKind> = {
   'rate-limited': 'rate-limited',
   rejected: 'server',
   network: 'network',
@@ -52,7 +54,7 @@ const REFRESH_FAILURE_KINDS: Record<
 
 function refreshFailedResult(
   account: InactiveClaudeAccount,
-  failure: Exclude<ClaudeOauthRefreshFailure, 'invalid-grant'>
+  failure: TransientRefreshFailure
 ): ProviderRateLimits {
   return makeClaudeUsageResult('error', `Token refresh failed (${failure})`, {
     source: 'oauth',
@@ -63,7 +65,7 @@ function refreshFailedResult(
   })
 }
 
-// Why: a dead refresh token is not transient; the row must say "sign in again" instead of retrying into 401s.
+// Why: a missing or dead refresh token is not transient; the row must say "sign in again" instead of retrying into 401s.
 function reauthRequiredResult(account: InactiveClaudeAccount): ProviderRateLimits {
   return makeClaudeUsageResult('error', 'Sign in to this account again', {
     source: 'oauth',
@@ -111,7 +113,10 @@ export async function fetchInactiveClaudeAccountUsage(
       return reauthRequiredResult(account)
     } else if (refresh.failure && isOauthTokenExpired(credentialsJson)) {
       // Why: an already-expired token can only turn into a 401; report the refresh failure and let the next open retry.
-      return refreshFailedResult(account, refresh.failure)
+      // Why: a blob with no stored refresh token has nothing to retry, so it is a login prompt, not a transient failure.
+      return refresh.failure === 'no-refresh-token'
+        ? reauthRequiredResult(account)
+        : refreshFailedResult(account, refresh.failure)
     }
     // Why: inside the refresh buffer the stored token is still accepted; a transient refresh failure just means we use it once more.
   }

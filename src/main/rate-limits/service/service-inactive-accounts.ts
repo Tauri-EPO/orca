@@ -87,7 +87,10 @@ export abstract class RateLimitServiceInactiveAccounts extends RateLimitServiceP
             fetchGeneration !== this.inactiveClaudeAccountsGeneration ||
             !this.isCurrentInactiveClaudeAccount(account.id)
           ) {
-            this.inactiveClaudeCache.delete(account.id)
+            // Why: a still-listed account keeps its snapshot; an account switch seeds the cache and nothing refetches it on the spot.
+            if (!this.isCurrentInactiveClaudeAccount(account.id)) {
+              this.inactiveClaudeCache.delete(account.id)
+            }
           } else {
             // Why: a thrown failure must still produce a row; a silent gap in the switcher is indistinguishable from "no data".
             const cached = this.inactiveClaudeCache.get(account.id) ?? null
