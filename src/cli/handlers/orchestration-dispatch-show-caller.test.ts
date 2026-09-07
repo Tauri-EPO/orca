@@ -207,6 +207,8 @@ describe('orchestration dispatch-show caller identity', () => {
     callMock
       .mockRejectedValueOnce(staleHandleError())
       .mockResolvedValueOnce({ result: { terminal: { handle: 'term_live_coord' } } })
+      .mockRejectedValueOnce(staleHandleError())
+      .mockResolvedValueOnce({ result: { terminal: { handle: 'term_live_coord' } } })
       .mockResolvedValueOnce({ result: { dispatch: null, preamble: 'preamble' } })
 
     await invokeDispatchShow(
@@ -222,11 +224,65 @@ describe('orchestration dispatch-show caller identity', () => {
     expect(callMock).toHaveBeenNthCalledWith(2, 'terminal.resolvePane', {
       paneKey: 'tab_coord:leaf_coord'
     })
-    expect(callMock).toHaveBeenNthCalledWith(3, 'orchestration.dispatchShow', {
+    // The pane that ran the command is the coordinator here, so both handles land on the same remint.
+    expect(callMock).toHaveBeenNthCalledWith(5, 'orchestration.dispatchShow', {
       task: 'task_1',
       preamble: true,
       from: 'term_live_coord',
       callerTerminalHandle: 'term_live_coord',
+      devMode: false
+    })
+  })
+
+  // Why: --from is an identity claim about who to speak as, not about who is speaking. Run scoping
+  // in #14898 keys on the caller, so borrowing the coordinator's handle would scope the read to the
+  // wrong pane's Run.
+  it('keeps the coordinator and the invoking caller distinct under --preamble', async () => {
+    process.env.ORCA_TERMINAL_HANDLE = 'term_caller'
+    callMock
+      .mockResolvedValueOnce({ result: { identity: { live: true } } })
+      .mockResolvedValueOnce({ result: { dispatch: null, preamble: 'preamble' } })
+
+    await invokeDispatchShow(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['preamble', true],
+        ['from', 'term_coord']
+      ])
+    )
+
+    // An explicit --from short-circuits coordinator resolution, so the only probe is the caller's own.
+    expect(callMock).toHaveBeenNthCalledWith(1, 'terminal.resolveIdentity', {
+      terminal: 'term_caller'
+    })
+    expect(callMock).toHaveBeenNthCalledWith(2, 'orchestration.dispatchShow', {
+      task: 'task_1',
+      preamble: true,
+      from: 'term_coord',
+      callerTerminalHandle: 'term_caller',
+      devMode: false
+    })
+    expect(callMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the caller distinct from --from on a non-preamble read', async () => {
+    process.env.ORCA_TERMINAL_HANDLE = 'term_caller'
+    callMock
+      .mockResolvedValueOnce({ result: { identity: { live: true } } })
+      .mockResolvedValueOnce({ result: { dispatch: null } })
+
+    await invokeDispatchShow(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    expect(callMock).toHaveBeenNthCalledWith(2, 'orchestration.dispatchShow', {
+      task: 'task_1',
+      preamble: undefined,
+      from: undefined,
+      callerTerminalHandle: 'term_caller',
       devMode: false
     })
   })

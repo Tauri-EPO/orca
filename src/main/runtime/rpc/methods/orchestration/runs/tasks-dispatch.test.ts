@@ -554,11 +554,19 @@ describe('orchestration RPC methods', () => {
       setup()
       const task = db.createTask({ spec: 'work' })
       createRootDispatch(db, task.id, 'term_a')
+      const method = findMethod('orchestration.dispatchShow')
 
-      const result = (await call('orchestration.dispatchShow', {
+      // Why: z.object strips undeclared keys, so only parsing proves the field crosses the method
+      // boundary — the result assertion alone would still pass if the schema dropped it.
+      const params = method.params!.parse({
         task: task.id,
-        callerTerminalHandle: 'term_coord'
-      })) as { dispatch: { task_id: string } | null }
+        callerTerminalHandle: 'term_caller'
+      })
+      expect(params).toMatchObject({ callerTerminalHandle: 'term_caller' })
+
+      const result = (await method.handler(params, ctx)) as {
+        dispatch: { task_id: string } | null
+      }
 
       expect(result.dispatch?.task_id).toBe(task.id)
     })

@@ -50,8 +50,9 @@ export const ORCHESTRATION_DISPATCH_INSPECTION_HANDLERS: Record<string, CommandH
       ? await resolveCoordinatorTerminalHandle(flags, cwd, client)
       : undefined
     // Why: carries caller identity for the Run scoping in #14898; best-effort because the runtime still
-    // ignores it, so requiring it now would break headless reads for no functional gain.
-    const callerTerminalHandle = from ?? (await resolveOptionalCallerTerminalHandle(flags, client))
+    // ignores it, so requiring it now would break headless reads for no functional gain. Resolved
+    // independently of `from`, which may name a coordinator this process is not.
+    const callerTerminalHandle = await resolveOptionalCallerTerminalHandle(flags, client)
     const result = await client.call<{
       dispatch: { id: string; task_id: string; status: string } | null
       preamble?: string

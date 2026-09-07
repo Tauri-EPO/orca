@@ -168,19 +168,21 @@ export async function resolveOptionalCallerTerminalHandle(
   flags: Map<string, string | boolean>,
   client: RuntimeClient
 ): Promise<string | undefined> {
-  const explicit = getOptionalStringFlag(flags, 'from')
-  if (explicit) {
-    return explicit
-  }
   const envHandle = process.env.ORCA_TERMINAL_HANDLE
   try {
     if (envHandle && envHandle.length > 0 && (await isLiveTerminalHandle(envHandle, client))) {
       return envHandle
     }
-    return await resolveOrchestrationPaneTerminalHandle(client, { optional: true })
+    const reminted = await resolveOrchestrationPaneTerminalHandle(client, { optional: true })
+    if (reminted) {
+      return reminted
+    }
   } catch {
-    return undefined
+    // An unresolvable ambient identity is not a reason to fail an advisory read.
   }
+  // Why: --from names the terminal to speak as, which is not always this process, so it stands in
+  // as the caller only for a shell carrying no pane identity of its own.
+  return getOptionalStringFlag(flags, 'from')
 }
 
 export async function resolveCoordinatorTerminalHandle(
