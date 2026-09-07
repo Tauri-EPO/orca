@@ -1,5 +1,6 @@
 import type { DispatchStatus } from '../../types'
 import type { TerminalExitCause } from '../../../../../shared/terminal-exit-cause'
+import type { DispatchHeartbeatStamp } from '../../../../../shared/orchestration-heartbeat-freshness'
 import { deriveWorkerTerminalListState } from '../../worker-terminal-ownership'
 import type {
   WorkerDispatchListState,
@@ -102,7 +103,7 @@ export function listWorkerTerminalResources(
   pendingInput: boolean
   pendingApproval: boolean
   terminationReason: TerminalExitCause['kind'] | null
-  lastHeartbeatAt: number | null
+  lastHeartbeatAt: DispatchHeartbeatStamp
   resource: WorkerTerminalResourceRow | null
   createdAt: string
   databaseId: number
@@ -239,6 +240,8 @@ export function listWorkerTerminalResources(
       terminationReason: row.termination_reason,
       // Arrival time on this host — every writer of `last_heartbeat_at` stamps it with this
       // clock — so the reader ages it against the same clock and needs no skew correction.
+      // A stored value nothing can parse stays `'unreadable'` rather than collapsing into the
+      // `null` that means the Dispatch never reported.
       lastHeartbeatAt: readUtcTimestampMs(row.last_heartbeat_at),
       resource,
       createdAt: row.created_at,

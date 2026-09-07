@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DISPATCH_HEARTBEAT_STALE_AFTER_MS,
+  formatDispatchHeartbeatAge,
   projectDispatchHeartbeat
 } from './orchestration-heartbeat-freshness'
 import type { FleetDurableWorker } from './orchestration-fleet-projection'
@@ -84,5 +85,40 @@ describe('dispatch heartbeat freshness', () => {
       projectOrchestrationFleetWorker(durableWorker({ lastHeartbeatAt: null }), undefined, NOW)
         .heartbeat
     ).toEqual({ state: 'none', lastReceivedAt: null, ageSeconds: null })
+  })
+
+  // Why: a stored stamp this host cannot parse is corruption, not silence. Folding it into `none`
+  // would report a Dispatch that heartbeated as one that never did.
+  it('keeps an unparseable stored stamp apart from never-reported', () => {
+    expect(projectDispatchHeartbeat('unreadable', NOW)).toEqual({
+      state: 'unreadable',
+      lastReceivedAt: null,
+      ageSeconds: null
+    })
+    expect(
+      projectOrchestrationFleetWorker(
+        durableWorker({ lastHeartbeatAt: 'unreadable' }),
+        undefined,
+        NOW
+      ).heartbeat?.state
+    ).toBe('unreadable')
+  })
+})
+
+describe('heartbeat age rendering', () => {
+  it('floors to one short unit', () => {
+    expect(formatDispatchHeartbeatAge(0)).toBe('0s')
+    expect(formatDispatchHeartbeatAge(59)).toBe('59s')
+    expect(formatDispatchHeartbeatAge(60)).toBe('1m')
+    expect(formatDispatchHeartbeatAge(2_580)).toBe('43m')
+    expect(formatDispatchHeartbeatAge(3_599)).toBe('59m')
+    expect(formatDispatchHeartbeatAge(7_200)).toBe('2h')
+  })
+
+  // Why: the projection deliberately keeps a stamp ahead of this host negative; flooring the
+  // magnitude alone would print it as an ordinary age.
+  it('keeps a stamp ahead of this host signed', () => {
+    expect(formatDispatchHeartbeatAge(-4)).toBe('-4s')
+    expect(formatDispatchHeartbeatAge(-3_600)).toBe('-1h')
   })
 })

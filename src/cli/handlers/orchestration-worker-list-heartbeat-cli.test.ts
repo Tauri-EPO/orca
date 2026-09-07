@@ -26,7 +26,10 @@ type WorkerListResponse = {
   }
 }
 
-function projection(heartbeat?: { state: string }): Record<string, unknown> {
+function projection(heartbeat?: {
+  state: string
+  ageSeconds?: number | null
+}): Record<string, unknown> {
   return {
     provider: { id: 'claude', model: 'opus' },
     host: { id: 'local' },
@@ -53,7 +56,7 @@ async function renderWorkerList(response: WorkerListResponse): Promise<string | 
   return formatter?.(response.result)
 }
 
-function workerRow(heartbeat?: { state: string }): WorkerListResponse {
+function workerRow(heartbeat?: { state: string; ageSeconds?: number | null }): WorkerListResponse {
   return {
     result: {
       workers: [
@@ -86,13 +89,37 @@ describe('orchestration worker-list heartbeat line', () => {
   })
 
   it('prints the freshness beside the liveness verdict, not instead of it', async () => {
-    const output = await renderWorkerList(workerRow({ state: 'stale' }))
-    expect(output).toContain('liveness=unverifiable heartbeat=stale provider=claude/opus')
+    const output = await renderWorkerList(workerRow({ state: 'stale', ageSeconds: 2_580 }))
+    expect(output?.split('\n')[0]).toBe(
+      'ctx_1 task=task_1 [running/working] attention=none liveness=unverifiable heartbeat=stale (43m) provider=claude/opus host=local workspace=ws_1 terminal=active next=none'
+    )
+  })
+
+  // Why: `stale` alone cannot separate a lane 11 minutes quiet from one quiet since yesterday,
+  // which is the whole decision the coordinator reads this line for.
+  it('renders the measured age for a fresh heartbeat too', async () => {
+    const output = await renderWorkerList(workerRow({ state: 'fresh', ageSeconds: 125 }))
+    expect(output).toContain('heartbeat=fresh (2m)')
   })
 
   it('prints none for a Dispatch that has never reported', async () => {
-    const output = await renderWorkerList(workerRow({ state: 'none' }))
+    const output = await renderWorkerList(workerRow({ state: 'none', ageSeconds: null }))
     expect(output).toContain('liveness=unverifiable heartbeat=none provider=claude/opus')
+    expect(output).not.toContain('heartbeat=none (')
+  })
+
+  // Why: a stored arrival stamp nothing can parse is corruption; it measures no age and must not
+  // read as silence.
+  it('prints unreadable without an age', async () => {
+    const output = await renderWorkerList(workerRow({ state: 'unreadable', ageSeconds: null }))
+    expect(output).toContain('liveness=unverifiable heartbeat=unreadable provider=claude/opus')
+  })
+
+  // Why: a paired host that publishes the state but not the age is still telling the truth about
+  // the state; inventing an age there would state a measurement nobody took.
+  it('prints the bare state when the host published no age', async () => {
+    const output = await renderWorkerList(workerRow({ state: 'stale' }))
+    expect(output).toContain('liveness=unverifiable heartbeat=stale provider=claude/opus')
   })
 
   // Why: a paired host that predates the field publishes no heartbeat at all, and inventing a
