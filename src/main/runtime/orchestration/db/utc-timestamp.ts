@@ -10,14 +10,16 @@ export function exposeUtcTimestamp(timestamp: string | null): string | null {
 }
 
 /** Epoch ms for a stored stamp in either the space format or an explicit-offset one.
- *  `null` for an absent or unparseable value, so a corrupt row cannot become a bogus instant. */
-export function readUtcTimestampMs(timestamp: string | null): number | null {
+ *  `null` = the column holds no value; `'unreadable'` = it holds one no parser accepts. The two
+ *  stay distinct so a corrupt row can neither become a bogus instant nor be reported as "never
+ *  written", and the literal (rather than `NaN`) keeps caller arithmetic type-checked and JSON-safe. */
+export function readUtcTimestampMs(timestamp: string | null): number | null | 'unreadable' {
   const exposed = exposeUtcTimestamp(timestamp)
   if (!exposed) {
     return null
   }
   const parsed = Date.parse(exposed)
-  return Number.isNaN(parsed) ? null : parsed
+  return Number.isNaN(parsed) ? 'unreadable' : parsed
 }
 
 export function exposeMessageTimestamps(message: MessageRow): MessageRow {

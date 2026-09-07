@@ -97,6 +97,35 @@ describe('orchestration worker-list heartbeat freshness', () => {
     expect(heartbeat?.ageSeconds).toBeGreaterThanOrEqual(60)
     expect(heartbeat?.ageSeconds).toBeLessThan(120)
   })
+
+  // Why: `Date.parse` failing used to collapse into the same `null` a never-dispatched heartbeat
+  // uses, so a corrupt row was published as "never reported" — the one reading a coordinator
+  // cannot act on. Corruption has to be its own word.
+  it('reports a stored stamp it cannot parse as unreadable, not as never reported', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Corrupt arrival stamp',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+    })
+    insertDispatch(db, run.id, 'ctx_silent')
+    insertDispatch(db, run.id, 'ctx_corrupt')
+    sqliteFor(db)
+      .prepare('UPDATE dispatch_contexts SET last_heartbeat_at = ? WHERE id = ?')
+      .run('not-a-timestamp', 'ctx_corrupt')
+
+    const result = await callWorkerList(runtime, { run: run.id, paginate: true })
+    const byDispatch = new Map(result.workers.map((worker) => [worker.dispatchId, worker]))
+
+    expect(byDispatch.get('ctx_corrupt')?.projection.heartbeat).toEqual({
+      state: 'unreadable',
+      lastReceivedAt: null,
+      ageSeconds: null
+    })
+    expect(byDispatch.get('ctx_silent')?.projection.heartbeat?.state).toBe('none')
+  })
 })
 
 async function callWorkerList(
