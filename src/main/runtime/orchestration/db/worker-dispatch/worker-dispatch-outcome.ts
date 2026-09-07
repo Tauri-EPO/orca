@@ -55,6 +55,9 @@ export function failWorkerStart(
     retainCapability?: boolean
     /** A start that died before authority attached still owns the terminal it created. */
     adoptResidualTerminal?: FailedStartTerminalAdoption
+    /** Why (#15958): the last stage's effects are still in memory, so a failure cause the
+     *  caller recorded there is lost unless this transition writes them. */
+    effects?: unknown[]
   } = {}
 ): WorkerDispatchRow {
   this.db.exec('BEGIN IMMEDIATE')
@@ -83,7 +86,12 @@ export function failWorkerStart(
       id: dispatchId,
       from: 'starting',
       to: 'failed',
-      projection: { stage, last_error: reason, updated_at: now }
+      projection: {
+        stage,
+        last_error: reason,
+        updated_at: now,
+        effects: options.effects ? JSON.stringify(options.effects) : worker.effects
+      }
     })
     const hasActiveDispatch = Boolean(
       this.db
@@ -121,7 +129,8 @@ export function markWorkerStartUnknown(
   this: OrchestrationDb,
   dispatchId: string,
   stage: string,
-  reason: string
+  reason: string,
+  options: { effects?: unknown[] } = {}
 ): WorkerDispatchRow {
   this.db.exec('BEGIN IMMEDIATE')
   try {
@@ -135,7 +144,12 @@ export function markWorkerStartUnknown(
       id: dispatchId,
       from: 'starting',
       to: 'start_unknown',
-      projection: { stage, last_error: reason, updated_at: new Date().toISOString() }
+      projection: {
+        stage,
+        last_error: reason,
+        updated_at: new Date().toISOString(),
+        effects: options.effects ? JSON.stringify(options.effects) : worker.effects
+      }
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'dispatch',

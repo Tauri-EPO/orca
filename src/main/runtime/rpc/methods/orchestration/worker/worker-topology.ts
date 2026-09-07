@@ -21,6 +21,7 @@ export type WorkerEffect = {
   terminalId?: string
   surface?: 'visible' | 'background'
   warning?: string
+  // A dispatch_input effect also carries `cause`/`detail`; see DispatchInputEffect.
 }
 
 export type WorkerSetupReceipt = {

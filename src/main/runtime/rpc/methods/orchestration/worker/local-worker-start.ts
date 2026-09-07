@@ -252,13 +252,8 @@ export async function startLocalWorker(args: {
       coordinatorHandle: params.from,
       dispatchCapability: capability,
       devMode: params.devMode,
-      requestId: orchestrationMutation?.requestId ?? started.dispatch.id
-    })
-    effects.push({
-      kind: 'dispatch_input',
-      role: 'agent',
-      id: terminalHandle,
-      state: 'accepted'
+      requestId: orchestrationMutation?.requestId ?? started.dispatch.id,
+      effects
     })
     const worker = db.markWorkerDispatchReady(started.dispatch.id, effects)
     monitorWorkerSetup({
@@ -303,6 +298,7 @@ export async function startLocalWorker(args: {
       setup: setupReceipt,
       launch: launch.receipt,
       mode,
+      effects,
       ...(residualAgentTerminal ? { residualAgentTerminal } : {})
     })
   }

@@ -19,6 +19,8 @@ export function failWorkerStartWithReceipt(args: {
   mode: WorkerStartModeReceipt
   /** The terminal this start created and never handed to an owner. */
   residualAgentTerminal?: FailedStartTerminalAdoption
+  /** Effects gathered since the last stage write, including the dispatch_input verdict. */
+  effects?: unknown[]
 }): unknown {
   const agentSessionRefusal = isAgentSessionPtyWriteRefusedError(args.error)
     ? args.error.refusal
@@ -29,12 +31,17 @@ export function failWorkerStartWithReceipt(args: {
     (args.error instanceof Error ? args.error.message : String(args.error))
   const unknown = isUnknownWorkerStartOutcome(args.error, args.failedStage)
   const worker = unknown
-    ? args.db.markWorkerStartUnknown(args.dispatchId, args.failedStage, reason)
+    ? args.db.markWorkerStartUnknown(args.dispatchId, args.failedStage, reason, {
+        effects: args.effects
+      })
     : args.db.failWorkerStart(args.dispatchId, args.failedStage, reason, {
         // Why (#16095): the preamble is written before submission is verified, so a stalled
         // verdict never means the worker lacks its task — keep the authority its report needs.
         retainCapability: isAgentPromptStalledError(args.error),
-        ...(args.residualAgentTerminal ? { adoptResidualTerminal: args.residualAgentTerminal } : {})
+        ...(args.residualAgentTerminal
+          ? { adoptResidualTerminal: args.residualAgentTerminal }
+          : {}),
+        effects: args.effects
       })
   // Only claim cleanup the ownership table actually accepted; the adoption declines a terminal
   // another resource already accounts for.

@@ -16,6 +16,7 @@ import {
   persistFederatedSetupWaitOutcome
 } from './federation-setup'
 import { FederationAttachStartParams } from './federation-start-schema'
+import { dispatchInputAcceptedEffect, dispatchInputFailedEffect } from '../dispatch-input-verdict'
 import { failFederatedAttachmentWithReceipt } from './federation-start-receipt'
 import { prepareFederationAttachmentWorkerStart } from '../worker/worker-start-validation'
 import {
@@ -244,33 +245,37 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
           terminalOwnership: params.terminal ? 'external' : 'created'
         })
         failedStage = 'dispatch_input'
-        const prompt = await runtime.sendTerminalAgentPrompt(
-          terminalHandle,
-          buildDispatchPreamble({
-            taskId: params.taskId,
-            dispatchId: params.dispatchId,
-            taskSpec: params.taskSpec,
-            coordinatorHandle: 'Run home (relayed by Orca)',
-            workerHandle: terminalHandle,
-            dispatchCapability: capability,
-            devMode: params.devMode,
-            // Why the worker host's own setting: enforcement runs here, with this
-            // host's code, against this host's cap.
-            canDispatchSubWorkers: (params.depth ?? 1) < runtime.getNestedWorkerMaxDepth(),
-            cliCommand: runtime.getTerminalOrchestrationCliCommand(terminalHandle)
-          }),
-          {
-            acceptQueued: true,
-            observationTimeoutMs: 0,
-            requestId: orchestrationMutation.requestId
-          }
-        )
-        effects.push({
-          kind: 'dispatch_input',
-          role: 'agent',
-          id: terminalHandle,
-          state: 'accepted'
-        })
+        // Captured so the rejection closure keeps the narrowed handle.
+        const agentHandle = terminalHandle
+        const prompt = await runtime
+          .sendTerminalAgentPrompt(
+            agentHandle,
+            buildDispatchPreamble({
+              taskId: params.taskId,
+              dispatchId: params.dispatchId,
+              taskSpec: params.taskSpec,
+              coordinatorHandle: 'Run home (relayed by Orca)',
+              workerHandle: agentHandle,
+              dispatchCapability: capability,
+              devMode: params.devMode,
+              // Why the worker host's own setting: enforcement runs here, with this
+              // host's code, against this host's cap.
+              canDispatchSubWorkers: (params.depth ?? 1) < runtime.getNestedWorkerMaxDepth(),
+              cliCommand: runtime.getTerminalOrchestrationCliCommand(agentHandle)
+            }),
+            {
+              acceptQueued: true,
+              observationTimeoutMs: 0,
+              requestId: orchestrationMutation.requestId
+            }
+          )
+          // Why (#15958): the exception never leaves this host, so the attachment is the only
+          // record the Run home can still read once the relay is gone.
+          .catch((error: unknown) => {
+            effects.push(dispatchInputFailedEffect(agentHandle, error))
+            throw error
+          })
+        effects.push(dispatchInputAcceptedEffect(agentHandle))
         const attachment = db.markRemoteAttachmentReady(params.dispatchId, effects)
         monitorFederatedSetup({ ...setupStage, runtime })
         return {
@@ -294,7 +299,8 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
           failedStage,
           error,
           setup,
-          launch: launch.receipt
+          launch: launch.receipt,
+          effects
         })
       }
     }

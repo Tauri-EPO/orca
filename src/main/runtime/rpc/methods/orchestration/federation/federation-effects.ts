@@ -12,6 +12,7 @@ export type FederationEffect = {
   hookFound?: boolean
   startupPolicy?: string
   terminalId?: string
+  // A dispatch_input effect also carries `cause`/`detail`; see DispatchInputEffect.
 }
 
 export function appendFederationTerminalEffects(

@@ -11,6 +11,8 @@ export function failFederatedAttachmentWithReceipt(args: {
   error: unknown
   setup: WorkerSetupReceipt
   launch: OrchestrationWorkerLaunchReceipt
+  /** Effects gathered since the last stage write, including the dispatch_input verdict. */
+  effects?: unknown[]
 }): unknown {
   const reason = args.error instanceof Error ? args.error.message : String(args.error)
   const unknown = isFederationEffectUnknown(args.error, args.failedStage)
@@ -18,7 +20,8 @@ export function failFederatedAttachmentWithReceipt(args: {
     args.dispatchId,
     args.failedStage,
     reason,
-    unknown
+    unknown,
+    { effects: args.effects }
   )
   return {
     dispatchId: args.dispatchId,

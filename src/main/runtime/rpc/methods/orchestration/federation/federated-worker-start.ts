@@ -241,14 +241,19 @@ export async function startFederatedWorker(args: {
       const worker = db.markWorkerStartUnknown(
         started.dispatch.id,
         remote.failedStage ?? 'remote_attach',
-        remote.lastError ?? 'The worker server reported an unknown start outcome.'
+        remote.lastError ?? 'The worker server reported an unknown start outcome.',
+        { effects: remote.effects }
       )
-      return federatedUnknownReceipt(worker, taskForRemote.id, server.name, launch)
+      return federatedUnknownReceipt(worker, taskForRemote.id, server.name, launch, remote)
     }
+    // Why (#15958): the remote receipt is the only place the dispatch_input verdict exists. Without
+    // persisting it here the home Dispatch keeps nothing, and a coordinator that can no longer
+    // reach the worker server has no way to read why the start failed.
     const worker = db.failWorkerStart(
       started.dispatch.id,
       remote.failedStage ?? 'remote_attach',
-      remote.lastError ?? `The worker server returned ${remote.state}.`
+      remote.lastError ?? `The worker server returned ${remote.state}.`,
+      { effects: remote.effects }
     )
     return {
       runId,

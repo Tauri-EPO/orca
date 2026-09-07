@@ -29,7 +29,9 @@ export function federatedUnknownReceipt(
   worker: { dispatch_id: string; state: string; stage: string; last_error: string | null },
   taskId: string,
   serverName: string,
-  launch: OrchestrationWorkerLaunchReceipt
+  launch: OrchestrationWorkerLaunchReceipt,
+  /** What the worker server reported before contact was lost; absent when it never answered. */
+  remote?: Pick<RemoteStartReceipt, 'effects' | 'residualResources'>
 ): unknown {
   return {
     taskId,
@@ -40,8 +42,8 @@ export function federatedUnknownReceipt(
     launch,
     failedStage: worker.stage,
     lastError: worker.last_error,
-    effects: [],
-    residualResources: [],
+    effects: remote?.effects ?? [],
+    residualResources: remote?.residualResources ?? [],
     nextCommands: [
       `orca orchestration worker-show --dispatch ${worker.dispatch_id} --json`,
       `orca orchestration worker-abandon --dispatch ${worker.dispatch_id} --json`
