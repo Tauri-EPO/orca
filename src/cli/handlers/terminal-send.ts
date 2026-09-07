@@ -2,16 +2,19 @@ import type { RuntimeTerminalSend } from '../../shared/runtime-types'
 import { TERMINAL_PROMPT_DELIVERY_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import type { CommandHandler } from '../dispatch'
 import { formatTerminalSend, printResult, terminalSendWarnings } from '../format'
-import { getOptionalPositiveIntegerFlag, getOptionalStringFlag } from '../flags'
+import { getOptionalPositiveIntegerFlag } from '../flags'
 import { readRetryRequestFlag } from '../retry-request-flag'
 import { RuntimeClientError } from '../runtime-client'
 import { attachUnverifiedTerminalPromptRecovery } from '../runtime/terminal-prompt-mutation-recovery'
 import { getTerminalHandle } from '../selectors'
+import { getTerminalSendText } from '../terminal-send-text-source'
 
 type TerminalSendResult = { send: RuntimeTerminalSend; warnings?: string[] }
 
 export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, json }) => {
-  const text = getOptionalStringFlag(flags, 'text')
+  // Why: file and stdin input resolve before prompt candidacy and the --retry-request preflight,
+  // so the retry ID stays bound to the payload actually sent.
+  const text = await getTerminalSendText(flags, cwd)
   const enter = flags.get('enter') === true
   const interrupt = flags.get('interrupt') === true
   const promptCandidate = !!text && enter && !interrupt
@@ -20,7 +23,7 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
   if ((retryRequest || waitSubmitSeconds) && !promptCandidate) {
     throw new RuntimeClientError(
       'invalid_argument',
-      '--retry-request and --wait-submit require --text with --enter and without --interrupt.'
+      '--retry-request and --wait-submit require --text or --text-file with --enter and without --interrupt.'
     )
   }
   if (waitSubmitSeconds && waitSubmitSeconds > 3600) {
