@@ -119,6 +119,7 @@ export const ORCHESTRATION_WORKER_TERMINAL_HANDLERS: Record<string, CommandHandl
           workspace: { id: string } | null
           stage: { activity: string }
           liveness: { verdict: string }
+          heartbeat?: { state: string }
           nextAction: { argv: string[] }
           attention?: { categories: string[] }
         }
@@ -160,8 +161,13 @@ export const ORCHESTRATION_WORKER_TERMINAL_HANDLERS: Record<string, CommandHandl
                 const stage = projection?.stage.activity ?? worker.dispatchStatus
                 const liveness = projection?.liveness.verdict
                 const attention = projection?.attention?.categories.join(',') || 'none'
+                // Beside liveness, not instead of it: liveness is the process verdict, heartbeat is
+                // the agent still reporting. A host that does not publish it prints no segment.
+                const heartbeat = projection?.heartbeat
+                  ? ` heartbeat=${projection.heartbeat.state}`
+                  : ''
                 const details = projection
-                  ? `/${stage}] attention=${attention} liveness=${liveness} provider=${provider} host=${projection.host.id} workspace=${workspace}`
+                  ? `/${stage}] attention=${attention} liveness=${liveness}${heartbeat} provider=${provider} host=${projection.host.id} workspace=${workspace}`
                   : `]`
                 // Why: the enumerating command owes the literal argv the guides tell callers to run.
                 const next = projection

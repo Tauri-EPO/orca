@@ -7,6 +7,7 @@ import type {
   WorkerTerminalListState
 } from '../../worker-terminal-ownership'
 import { OrchestrationError } from '../../orchestration-error'
+import { readUtcTimestampMs } from '../utc-timestamp'
 import type { OrchestrationDb } from '../orchestration-db'
 import {
   getWorkerAttentionFacts,
@@ -101,6 +102,7 @@ export function listWorkerTerminalResources(
   pendingInput: boolean
   pendingApproval: boolean
   terminationReason: TerminalExitCause['kind'] | null
+  lastHeartbeatAt: number | null
   resource: WorkerTerminalResourceRow | null
   createdAt: string
   databaseId: number
@@ -168,6 +170,7 @@ export function listWorkerTerminalResources(
               t.parent_id AS parent_task_id,
               d.task_id, d.run_id, d.status AS dispatch_status,
               d.termination_reason,
+              d.last_heartbeat_at,
               EXISTS (
                 SELECT 1 FROM question_threads q
                  WHERE q.dispatch_id = d.id AND q.status = 'pending'
@@ -195,6 +198,7 @@ export function listWorkerTerminalResources(
     run_id: string
     dispatch_status: DispatchStatus
     termination_reason: TerminalExitCause['kind'] | null
+    last_heartbeat_at: string | null
     pending_input: number
     pending_approval: number
     created_at: string
@@ -233,6 +237,9 @@ export function listWorkerTerminalResources(
       pendingInput: row.pending_input === 1,
       pendingApproval: row.pending_approval === 1,
       terminationReason: row.termination_reason,
+      // Arrival time on this host — every writer of `last_heartbeat_at` stamps it with this
+      // clock — so the reader ages it against the same clock and needs no skew correction.
+      lastHeartbeatAt: readUtcTimestampMs(row.last_heartbeat_at),
       resource,
       createdAt: row.created_at,
       databaseId: row.database_id

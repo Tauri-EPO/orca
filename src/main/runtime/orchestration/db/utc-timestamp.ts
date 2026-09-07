@@ -9,6 +9,17 @@ export function exposeUtcTimestamp(timestamp: string | null): string | null {
   return `${timestamp.replace(' ', 'T')}Z`
 }
 
+/** Epoch ms for a stored stamp in either the space format or an explicit-offset one.
+ *  `null` for an absent or unparseable value, so a corrupt row cannot become a bogus instant. */
+export function readUtcTimestampMs(timestamp: string | null): number | null {
+  const exposed = exposeUtcTimestamp(timestamp)
+  if (!exposed) {
+    return null
+  }
+  const parsed = Date.parse(exposed)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
 export function exposeMessageTimestamps(message: MessageRow): MessageRow {
   // Why: SQLite stores UTC as timezone-less space format for SQL ordering, but RPC/CLI consumers need an explicit offset.
   return {
