@@ -426,30 +426,34 @@ describe('orca root help', () => {
 
     const issueHelp = String(logSpy.mock.calls[0][0])
     expect(issueHelp).toContain('orca linear issue [<id>]')
-    expect(issueHelp).toMatch(/--comments\s+Include threaded Linear comments/)
-    expect(issueHelp).toMatch(/--attachments\s+Include attachment metadata and URLs/)
-    expect(issueHelp).toMatch(/--activity\s+Include issue field-change history/)
-    expect(issueHelp).toMatch(/--workspace <id>\s+Connected Linear workspace id/)
-    expect(issueHelp).toMatch(/--id <id>\s+Linear issue key, id, or URL/)
+    expect(issueHelp).toMatch(/--comments[ \t]+Include threaded Linear comments/)
+    expect(issueHelp).toMatch(/--attachments[ \t]+Include attachment metadata and URLs/)
+    expect(issueHelp).toMatch(/--activity[ \t]+Include issue field-change history/)
+    expect(issueHelp).toMatch(/--workspace <id>[ \t]+Connected Linear workspace id/)
+    expect(issueHelp).toMatch(/--id <id>[ \t]+Linear issue key, id, or URL/)
 
     logSpy.mockClear()
     await main(['linear', 'search', '--help'], '/tmp/repo')
 
     const searchHelp = String(logSpy.mock.calls[0][0])
     expect(searchHelp).toContain('orca linear search <query>')
-    expect(searchHelp).toMatch(/--workspace <id\|all>\s+Connected Linear workspace id, or all/)
-    expect(searchHelp).toMatch(/--query <text>\s+Text to search across Linear issues/)
+    expect(searchHelp).toMatch(/--workspace <id\|all>[ \t]+Connected Linear workspace id, or all/)
+    expect(searchHelp).toMatch(/--query <text>[ \t]+Text to search across Linear issues/)
 
     logSpy.mockClear()
     await main(['linear', 'list-issues', '--help'], '/tmp/repo')
 
     const listIssuesHelp = String(logSpy.mock.calls[0][0])
     expect(listIssuesHelp).toMatch(
-      /--cursor <cursor>\s+Opaque cursor from a previous list-issues page; issued cursors bind the workspace, raw Linear cursors need --workspace/
+      /--cursor <cursor>[ \t]+Opaque cursor from a previous list-issues page; issued cursors bind the workspace, raw Linear cursors need --workspace/
     )
-    expect(listIssuesHelp).toMatch(/--workspace <id\|all>\s+Connected Linear workspace id, or all/)
+    expect(listIssuesHelp).toMatch(
+      /--workspace <id\|all>[ \t]+Connected Linear workspace id, or all/
+    )
     expect(listIssuesHelp).toContain('0=none, 1=urgent, 2=high, 3=medium, 4=low')
-    expect(listIssuesHelp).toMatch(/--limit <n>\s+Max issues to return; omit to return every match/)
+    expect(listIssuesHelp).toMatch(
+      /--limit <n>[ \t]+Max issues to return; omit to return every match/
+    )
     expect(listIssuesHelp).not.toContain('Line cursor from a previous read')
     expect(callMock).not.toHaveBeenCalled()
   })
@@ -462,7 +466,9 @@ describe('orca root help', () => {
 
     const help = String(logSpy.mock.calls[0][0])
     expect(help).toContain('[--include-visual-layouts] [--json]')
-    expect(help).toContain('--include-visual-layouts Include tab and pane topology in JSON output')
+    expect(help).toMatch(
+      /--include-visual-layouts[ \t]+Include tab and pane topology in JSON output/
+    )
     expect(help).toContain('JSON omits visualLayouts by default')
     expect(callMock).not.toHaveBeenCalled()
   })
@@ -475,7 +481,7 @@ describe('orca root help', () => {
 
     const help = String(logSpy.mock.calls[0][0])
     expect(help).toMatch(
-      /--cursor <cursor>\s+Opaque cursor returned by a previous worker-read page/
+      /--cursor <cursor>[ \t]+Opaque cursor returned by a previous worker-read page/
     )
     expect(help).not.toContain('Line cursor from a previous read')
     expect(callMock).not.toHaveBeenCalled()
@@ -489,7 +495,7 @@ describe('orca root help', () => {
 
     const help = String(logSpy.mock.calls[0][0])
     expect(help).toContain('[--cursor <cursor>]')
-    expect(help).toMatch(/--cursor <cursor>\s+Opaque page cursor copied from page.nextCursor/)
+    expect(help).toMatch(/--cursor <cursor>[ \t]+Opaque page cursor copied from page.nextCursor/)
     expect(help).toContain('Continue with the opaque page.nextCursor value unchanged.')
     expect(help).not.toContain('--cursor <dispatch_id>')
     expect(help).not.toContain('Line cursor from a previous read')
@@ -509,7 +515,9 @@ describe('orca root help', () => {
 
     const setHelp = String(logSpy.mock.calls[0][0])
     expect(setHelp).toContain('--linear-issue <identifier-or-url|null>')
-    expect(setHelp).toContain('--linear-issue <id|url|null> Linked Linear issue identifier or URL')
+    expect(setHelp).toMatch(
+      /--linear-issue <id\|url\|null>[ \t]+Linked Linear issue identifier or URL/
+    )
     expect(callMock).not.toHaveBeenCalled()
   })
 
@@ -521,8 +529,8 @@ describe('orca root help', () => {
 
     const help = String(logSpy.mock.calls[0][0])
     expect(help).toContain('[--task-title <text>] [--display-name <text>]')
-    expect(help).toMatch(/--task-title <text>\s+Concise title for the orchestration task/)
-    expect(help).toMatch(/--display-name <text>\s+UI label shown for dispatched worker rows/)
+    expect(help).toMatch(/--task-title <text>[ \t]+Concise title for the orchestration task/)
+    expect(help).toMatch(/--display-name <text>[ \t]+UI label shown for dispatched worker rows/)
     expect(callMock).not.toHaveBeenCalled()
   })
 

@@ -742,7 +742,7 @@ describe('orchestration worker-start CLI contract', () => {
     ).toBe(true)
     expect(listSpec?.allowedFlags).toContain('include-remote')
     expect(formatCommandHelp(listSpec!)).toMatch(
-      /--include-remote\s+Include connected-server worker observations/
+      /--include-remote[ \t]+Include connected-server worker observations/
     )
 
     callMock.mockResolvedValue({

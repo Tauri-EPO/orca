@@ -15,8 +15,14 @@ export function resolveFlagHelp(
       : { label: `--${flag}`, description: commandHelp }
   }
 
-  const legacyMatch = /^(.+?)\s{2,}(\S.*)$/.exec(legacyHelp)
-  return legacyMatch
-    ? { label: legacyMatch[1], description: legacyMatch[2] }
+  const paddedMatch = /^(.+?)\s{2,}(\S.*)$/.exec(legacyHelp)
+  if (paddedMatch) {
+    return { label: paddedMatch[1], description: paddedMatch[2] }
+  }
+
+  // Unpadded legacy entries: a value spec is bracketed or alternation-separated, never prose.
+  const singleSpaceMatch = /^(--[A-Za-z0-9-]+(?: (?:<[^>]+>|\S*\|\S*))?) (\S.*)$/.exec(legacyHelp)
+  return singleSpaceMatch
+    ? { label: singleSpaceMatch[1], description: singleSpaceMatch[2] }
     : { label: legacyHelp }
 }
