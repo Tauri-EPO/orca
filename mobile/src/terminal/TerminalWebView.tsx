@@ -1,4 +1,4 @@
-import { useRef, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo, useState } from 'react'
+import { useRef, useCallback, forwardRef, useImperativeHandle, useEffect, useMemo } from 'react'
 import { Platform, View } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import type { TerminalOscLinkRange } from '../../../src/shared/terminal-osc-link-ranges'
@@ -7,6 +7,7 @@ import {
   TerminalWebViewEngineErrorOverlay,
   useTerminalWebViewEngineErrorState
 } from './terminal-webview-engine-error-state'
+import { useTerminalWebViewDocumentLifecycle } from './terminal-webview-document-lifecycle'
 import { TERMINAL_WEBVIEW_FRAME_STYLES } from './terminal-webview-frame-styles'
 import { useTerminalWebReadyWatchdog } from './terminal-webview-ready-watchdog'
 import { useTerminalWebViewPingProbe } from './terminal-webview-ping-probe'
@@ -45,11 +46,6 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 ) {
   const webViewRef = useRef<WebView>(null)
   const isWebReadyRef = useRef(false)
-  // Why: the engine's inline script blocks the document's first paint, and iOS can resume
-  // with a blanked backing store — both show the native white surface. Track paint readiness
-  // as state so the WebView stays hidden behind the themed container until the 'ready'
-  // notification, which follows the post-init rAF chain and thus a committed paint (#17304).
-  const [surfaceReady, setSurfaceReady] = useState(false)
   const pendingMessages = useMemo(() => createTerminalWebViewPendingMessages(), [])
   const messageIdRef = useRef(0)
   const pendingPingIdRef = useRef<number | null>(null)
@@ -116,6 +112,24 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     }
   }, [writeCoalescer])
 
+  const {
+    handleContentProcessDidTerminate,
+    handleReload,
+    hideSurface,
+    invalidateDocument,
+    markSurfacePainted,
+    surfaceReady
+  } = useTerminalWebViewDocumentLifecycle({
+    armWebReadyWatchdog,
+    attemptPingRecovery,
+    clearEngineError,
+    isWebReadyRef,
+    pendingMessages,
+    pendingPingIdRef,
+    webViewRef,
+    writeCoalescer
+  })
+
   const confirmWebReady = useCallback(
     (notifyParent: boolean) => {
       pendingPingIdRef.current = null
@@ -163,18 +177,17 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         // re-inits (the repaint); the foreground-recovery ping runs its own resubscribe.
         confirmWebReady(takeProbeNotifyParent())
       } else if (msg.type === 'ready') {
-        // Why: the WebView's init() rAF chain has run — term is open,
-        // renderService is populated, first paint has happened. Resolve
-        // any pending awaitReady() so a queued measure can now safely
-        // read cell dims.
-        // Why: web-ready/pong prove script liveness, not a committed repaint — revealing
-        // there can still show the native white surface. 'ready' follows the rAF chain
-        // after first paint, so this is the earliest honest moment to show the surface.
-        setSurfaceReady(true)
-        const resolve = readyResolveRef.current
-        readyResolveRef.current = null
-        readyPromiseRef.current = null
-        resolve?.()
+        // Why: resize() notifies 'ready' too, synchronously. Only init's runs after the rAF
+        // chain and the drained replay, so only it proves the repaint — a resize flushed
+        // during foreground recovery would reveal the still-blank surface and answer the
+        // awaitReady() a measure is holding for the init that has not landed yet.
+        if (msg.source === 'init') {
+          markSurfacePainted()
+          const resolve = readyResolveRef.current
+          readyResolveRef.current = null
+          readyPromiseRef.current = null
+          resolve?.()
+        }
       } else if (msg.type === 'measure-result') {
         const resolve = measureResolveRef.current
         measureResolveRef.current = null
@@ -202,6 +215,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     },
     [
       confirmWebReady,
+      markSurfacePainted,
       reportEngineError,
       onSelectionMode,
       onSelectionCopy,
@@ -230,36 +244,6 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     }
   }, [attemptPingRecovery, reportEngineError])
 
-  const handleLoadStart = useCallback(() => {
-    isWebReadyRef.current = false
-    setSurfaceReady(false)
-    pendingPingIdRef.current = null
-    armWebReadyWatchdog()
-    // Why: messages queued for a previous WebView generation are stale after a reload;
-    // dropping them avoids replaying terminal chunks before the next init snapshot.
-    pendingMessages.clear()
-    writeCoalescer.clear()
-  }, [armWebReadyWatchdog, pendingMessages, writeCoalescer])
-
-  const handleReload = useCallback(() => {
-    clearEngineError()
-    // Why: in the wedged live-document state, reload reproduces the same error while a
-    // ping recovers instantly (the app-switch cure); reload stays as the last resort.
-    attemptPingRecovery(true, () => webViewRef.current?.reload())
-  }, [attemptPingRecovery, clearEngineError])
-
-  const handleContentProcessDidTerminate = useCallback(() => {
-    // Why: WKWebView content-process loss is recoverable; stale commands belong
-    // to the dead document and the replacement must prove readiness before replay.
-    isWebReadyRef.current = false
-    pendingPingIdRef.current = null
-    pendingMessages.clear()
-    writeCoalescer.clear()
-    clearEngineError()
-    armWebReadyWatchdog()
-    webViewRef.current?.reload()
-  }, [armWebReadyWatchdog, clearEngineError, pendingMessages, writeCoalescer])
-
   useEffect(() => {
     postMessage({ type: 'set-theme', terminalTheme })
   }, [postMessage, terminalThemeKey, terminalTheme])
@@ -282,7 +266,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         isWebReadyRef.current = false
         // Why: a blanked store shows white until repaint; hiding is invisible because the
         // container shares the terminal background.
-        setSurfaceReady(false)
+        hideSurface()
         markRecoveryPing()
         armWebReadyWatchdog()
         pendingPingIdRef.current = sendToWebView({ type: 'ping' })
@@ -406,6 +390,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     }),
     [
       armWebReadyWatchdog,
+      hideSurface,
       markRecoveryPing,
       postMessage,
       sendToWebView,
@@ -434,7 +419,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         // Why: Android WebView defaults textZoom to the system font scale, inflating
         // xterm's DOM glyphs past its canvas-measured cell grid (#4579). iOS ignores it.
         textZoom={100}
-        onLoadStart={handleLoadStart}
+        onLoadStart={invalidateDocument}
         onMessage={handleMessage}
         onError={(event) => reportNativeEngineError('Terminal WebView load failed', event)}
         onHttpError={(event) => reportNativeEngineError('Terminal WebView HTTP error', event)}

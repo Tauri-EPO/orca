@@ -27,7 +27,10 @@ vi.mock('lucide-react-native', () => ({ RefreshCw: 'RefreshCw' }))
 vi.mock('react-native-webview', () => ({
   WebView: forwardRef(function MockWebView(props: Record<string, unknown>, ref) {
     if (ref && typeof ref === 'object') {
-      ;(ref as { current: unknown }).current = { postMessage: mocks.postMessage, reload: mocks.reload }
+      ;(ref as { current: unknown }).current = {
+        postMessage: mocks.postMessage,
+        reload: mocks.reload
+      }
     }
     return createElement('WebView', props)
   })
@@ -61,7 +64,10 @@ describe('TerminalWebView surface readiness gate', () => {
     vi.useRealTimers()
   })
 
-  function render(): { renderer: ReactTestRenderer; ref: { current: TerminalWebViewHandle | null } } {
+  function render(): {
+    renderer: ReactTestRenderer
+    ref: { current: TerminalWebViewHandle | null }
+  } {
     const ref = { current: null as TerminalWebViewHandle | null }
     let renderer!: ReactTestRenderer
     act(() => {
@@ -78,14 +84,14 @@ describe('TerminalWebView surface readiness gate', () => {
     deliverMessage(renderer, { type: 'web-ready' })
     expect(webViewIsHidden(renderer)).toBe(true)
 
-    deliverMessage(renderer, { type: 'ready' })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
     expect(webViewIsHidden(renderer)).toBe(false)
   })
 
   it('hides again on load start and stays hidden through the recovery pong until ready', () => {
     const { renderer, ref } = render()
     deliverMessage(renderer, { type: 'web-ready' })
-    deliverMessage(renderer, { type: 'ready' })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
     expect(webViewIsHidden(renderer)).toBe(false)
 
     act(() => {
@@ -104,8 +110,42 @@ describe('TerminalWebView surface readiness gate', () => {
     // Why: the pong restores messaging, but only the re-init 'ready' proves a repaint.
     expect(webViewIsHidden(renderer)).toBe(true)
 
-    deliverMessage(renderer, { type: 'ready' })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
     expect(webViewIsHidden(renderer)).toBe(false)
+  })
+
+  it('stays hidden when a resize answers before the recovery re-init', () => {
+    const { renderer, ref } = render()
+    deliverMessage(renderer, { type: 'web-ready' })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
+
+    act(() => {
+      ref.current?.prepareForForegroundRecovery()
+    })
+    const pingId = JSON.parse(mocks.postMessage.mock.calls.at(-1)?.[0] as string).id as number
+    deliverMessage(renderer, { type: 'pong', pingId })
+
+    // Why: resize() notifies 'ready' synchronously, so a queued resize flushed by the pong
+    // answers before the re-init repaint — accepting it would reveal the blank surface.
+    deliverMessage(renderer, { type: 'ready', source: 'resize' })
+    expect(webViewIsHidden(renderer)).toBe(true)
+
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
+    expect(webViewIsHidden(renderer)).toBe(false)
+  })
+
+  it('hides the surface when the content process terminates', () => {
+    const { renderer } = render()
+    deliverMessage(renderer, { type: 'web-ready' })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
+    expect(webViewIsHidden(renderer)).toBe(false)
+
+    act(() => {
+      findWebView(renderer).props.onContentProcessDidTerminate({ nativeEvent: {} })
+    })
+    // Why: the dead process leaves an invalid backing store on screen until onLoadStart.
+    expect(webViewIsHidden(renderer)).toBe(true)
+    expect(mocks.reload).toHaveBeenCalledTimes(1)
   })
 
   function lastPostedPingId(): number {
@@ -156,6 +196,54 @@ describe('TerminalWebView surface readiness gate', () => {
       vi.advanceTimersByTime(2500)
     })
     expect(onEngineError).toHaveBeenCalled()
+  })
+
+  it('hides a surface the fallback reload is about to discard', () => {
+    // Why: an init 'ready' can land while readiness is still invalid (recovery ping
+    // unanswered), leaving the surface visible when the probe later gives up. reload()
+    // blanks the backing store before onLoadStart can hide it.
+    vi.useFakeTimers()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, {} as never))
+    })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
+    expect(webViewIsHidden(renderer)).toBe(false)
+
+    act(() => {
+      vi.advanceTimersByTime(15000 + 2500)
+    })
+    const overlay = renderer.root.findByType(TerminalWebViewEngineErrorOverlay)
+    act(() => {
+      overlay.props.onReload()
+    })
+    act(() => {
+      vi.advanceTimersByTime(2500)
+    })
+    expect(mocks.reload).toHaveBeenCalledTimes(1)
+    expect(webViewIsHidden(renderer)).toBe(true)
+  })
+
+  it('cancels an armed ping probe when the pane unmounts', () => {
+    vi.useFakeTimers()
+    const onEngineError = vi.fn()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, { onEngineError } as never))
+    })
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    expect(lastPostedPingId()).toBeGreaterThan(0)
+
+    act(() => {
+      renderer.unmount()
+    })
+    act(() => {
+      vi.advanceTimersByTime(2500)
+    })
+    // Why: the give-up would report an engine error for a pane that no longer exists.
+    expect(onEngineError).not.toHaveBeenCalled()
   })
 
   it('reload button pings first and only reloads when the probe expires', () => {
@@ -209,7 +297,7 @@ describe('TerminalWebView surface readiness gate', () => {
     try {
       const { renderer, ref } = render()
       deliverMessage(renderer, { type: 'web-ready' })
-      deliverMessage(renderer, { type: 'ready' })
+      deliverMessage(renderer, { type: 'ready', source: 'init' })
       act(() => {
         ref.current?.prepareForForegroundRecovery()
       })

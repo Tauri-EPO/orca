@@ -1,4 +1,4 @@
-import { useCallback, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, type RefObject } from 'react'
 
 // Why: long enough for a suspended document to wake and answer, short enough that a
 // genuinely dead engine still reaches the error overlay promptly.
@@ -47,6 +47,10 @@ export function useTerminalWebViewPingProbe(
     cancelPingProbe()
     probeNotifyParentRef.current = false
   }, [cancelPingProbe])
+
+  // Why: an armed probe outlives the pane by up to the grace window, and its give-up
+  // reports an engine error or reloads a WebView the unmounted owner no longer has.
+  useEffect(() => cancelPingProbe, [cancelPingProbe])
 
   const takeProbeNotifyParent = useCallback(() => {
     const notifyParent = probeNotifyParentRef.current
