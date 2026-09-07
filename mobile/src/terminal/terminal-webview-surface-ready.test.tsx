@@ -134,6 +134,88 @@ describe('TerminalWebView surface readiness gate', () => {
     expect(webViewIsHidden(renderer)).toBe(false)
   })
 
+  it('pings for a lost init ready and reveals on the re-init that follows', () => {
+    // Why: web-ready clears the readiness watchdog, so before this nothing watched for a
+    // lost init 'ready' — the surface stayed hidden with no ping and no overlay.
+    vi.useFakeTimers()
+    const onWebReady = vi.fn()
+    const onEngineError = vi.fn()
+    const ref = { current: null as TerminalWebViewHandle | null }
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, { ref, onWebReady, onEngineError } as never))
+    })
+    deliverMessage(renderer, { type: 'web-ready' })
+    expect(onWebReady).toHaveBeenCalledTimes(1)
+    act(() => {
+      ref.current?.init(80, 24)
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    const pingId = lastPostedPingId()
+    expect(onEngineError).not.toHaveBeenCalled()
+
+    // Why: the probe pong must notify the parent — only its resubscribe re-inits, and only
+    // an init 'ready' opens the gate. The pong itself proves nothing about paint.
+    deliverMessage(renderer, { type: 'pong', pingId })
+    expect(onWebReady).toHaveBeenCalledTimes(2)
+    act(() => {
+      vi.advanceTimersByTime(60000)
+    })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
+    expect(webViewIsHidden(renderer)).toBe(false)
+    expect(onEngineError).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the engine error when the lost-paint probe goes unanswered', () => {
+    vi.useFakeTimers()
+    const onEngineError = vi.fn()
+    const ref = { current: null as TerminalWebViewHandle | null }
+    act(() => {
+      create(createElement(TerminalWebView, { ref, onEngineError } as never))
+    })
+    act(() => {
+      ref.current?.init(80, 24)
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(15000)
+    })
+    expect(onEngineError).not.toHaveBeenCalled()
+    act(() => {
+      vi.advanceTimersByTime(2500)
+    })
+    // Why: the document is web-ready, so only the painted surface can clear this probe.
+    expect(onEngineError).toHaveBeenCalledWith(
+      'Terminal did not paint - no init ready from the terminal view'
+    )
+  })
+
+  it('does not judge paint once the init ready has arrived', () => {
+    vi.useFakeTimers()
+    const onEngineError = vi.fn()
+    const ref = { current: null as TerminalWebViewHandle | null }
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(createElement(TerminalWebView, { ref, onEngineError } as never))
+    })
+    deliverMessage(renderer, { type: 'web-ready' })
+    act(() => {
+      ref.current?.init(80, 24)
+    })
+    deliverMessage(renderer, { type: 'ready', source: 'init' })
+
+    mocks.postMessage.mockClear()
+    act(() => {
+      vi.advanceTimersByTime(60000)
+    })
+    expect(onEngineError).not.toHaveBeenCalled()
+    expect(postedTypes()).not.toContain('ping')
+    expect(webViewIsHidden(renderer)).toBe(false)
+  })
+
   it('hides the surface when the content process terminates', () => {
     const { renderer } = render()
     deliverMessage(renderer, { type: 'web-ready' })
@@ -147,6 +229,12 @@ describe('TerminalWebView surface readiness gate', () => {
     expect(webViewIsHidden(renderer)).toBe(true)
     expect(mocks.reload).toHaveBeenCalledTimes(1)
   })
+
+  function postedTypes(): string[] {
+    return mocks.postMessage.mock.calls.map(
+      (c) => (JSON.parse(c[0] as string) as { type: string }).type
+    )
+  }
 
   function lastPostedPingId(): number {
     const pings = mocks.postMessage.mock.calls

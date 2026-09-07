@@ -23,17 +23,21 @@ export function useTerminalWebViewPingProbe(
     probeGiveUpRef.current = null
   }, [])
 
+  // Why: `isRecoveredRef` names the signal that proves this probe's cure. The paint probe
+  // runs on a document that is already web-ready, so judging it by liveness would silence
+  // its give-up forever; it watches the painted surface instead.
   const attemptPingRecovery = useCallback(
-    (notifyParent: boolean, onGiveUp: () => void) => {
+    (notifyParent: boolean, onGiveUp: () => void, isRecoveredRef?: RefObject<boolean>) => {
       cancelPingProbe()
       probeNotifyParentRef.current = notifyParent
       probeGiveUpRef.current = onGiveUp
+      const recoveredRef = isRecoveredRef ?? isWebReadyRef
       sendPing()
       probeTimerRef.current = setTimeout(() => {
         probeTimerRef.current = null
         const giveUp = probeGiveUpRef.current
         probeGiveUpRef.current = null
-        if (!isWebReadyRef.current) {
+        if (!recoveredRef.current) {
           giveUp?.()
         }
       }, WEB_READY_PROBE_GRACE_MS)

@@ -9,7 +9,10 @@ import {
 } from './terminal-webview-engine-error-state'
 import { useTerminalWebViewDocumentLifecycle } from './terminal-webview-document-lifecycle'
 import { TERMINAL_WEBVIEW_FRAME_STYLES } from './terminal-webview-frame-styles'
-import { useTerminalWebReadyWatchdog } from './terminal-webview-ready-watchdog'
+import {
+  TERMINAL_WEB_READY_UNMET,
+  useTerminalWebReadyWatchdog
+} from './terminal-webview-ready-watchdog'
 import { useTerminalWebViewPingProbe } from './terminal-webview-ping-probe'
 import { XTERM_WEBVIEW_SOURCE } from './terminal-webview-html'
 import type { TerminalWebViewCommand } from './terminal-webview-messages'
@@ -62,9 +65,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   const { clearEngineError, engineError, reportEngineError, reportNativeEngineError } =
     useTerminalWebViewEngineErrorState(onEngineError)
   const webReadyProbeRef = useRef<(() => void) | null>(null)
-  const runWebReadyProbe = useCallback(() => {
-    webReadyProbeRef.current?.()
-  }, [])
+  // Why: late-bound, because the probe needs attemptPingRecovery, which is built below.
+  const runWebReadyProbe = useCallback(() => webReadyProbeRef.current?.(), [])
   const { armWebReadyWatchdog, clearWebReadyWatchdog } = useTerminalWebReadyWatchdog(
     isWebReadyRef,
     reportEngineError,
@@ -113,6 +115,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   }, [writeCoalescer])
 
   const {
+    armPaintReadyWatchdog,
     handleContentProcessDidTerminate,
     handleReload,
     hideSurface,
@@ -126,6 +129,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     isWebReadyRef,
     pendingMessages,
     pendingPingIdRef,
+    reportEngineError,
     webViewRef,
     writeCoalescer
   })
@@ -235,12 +239,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 
   useEffect(() => {
     webReadyProbeRef.current = () => {
-      attemptPingRecovery(true, () =>
-        reportEngineError(
-          'Terminal did not initialize - no ready signal from the terminal view',
-          true
-        )
-      )
+      attemptPingRecovery(true, () => reportEngineError(TERMINAL_WEB_READY_UNMET, true))
     }
   }, [attemptPingRecovery, reportEngineError])
 
@@ -297,6 +296,11 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         readyPromiseRef.current = new Promise<void>((resolve) => {
           readyResolveRef.current = resolve
         })
+        // Why: only init's 'ready' opens the surface gate, and nothing else watches for
+        // it — a lost one leaves a hidden terminal with no ping and no overlay, curable
+        // only by an app switch. This is the arming edge because a pane the session
+        // never subscribed to never inits, and must not be judged for not painting.
+        armPaintReadyWatchdog()
         // Why: pending chunks are pre-snapshot data; the init snapshot supersedes
         // them, and writing them after init would corrupt the fresh buffer.
         writeCoalescer.clear()
@@ -389,6 +393,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
       }
     }),
     [
+      armPaintReadyWatchdog,
       armWebReadyWatchdog,
       hideSurface,
       markRecoveryPing,
