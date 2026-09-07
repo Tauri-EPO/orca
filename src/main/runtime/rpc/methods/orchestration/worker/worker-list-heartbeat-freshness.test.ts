@@ -126,6 +126,27 @@ describe('orchestration worker-list heartbeat freshness', () => {
     })
     expect(byDispatch.get('ctx_silent')?.projection.heartbeat?.state).toBe('none')
   })
+
+  // Why: SQL NULL is the only "never written". An empty string is a value that was stored and lost
+  // its contents, and reporting that as `none` would blame the coordinator's own protocol.
+  it('reports an empty stored stamp as unreadable rather than never reported', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Empty arrival stamp',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    })
+    insertDispatch(db, run.id, 'ctx_empty')
+    sqliteFor(db)
+      .prepare('UPDATE dispatch_contexts SET last_heartbeat_at = ? WHERE id = ?')
+      .run('', 'ctx_empty')
+
+    const result = await callWorkerList(runtime, { run: run.id, paginate: true })
+
+    expect(result.workers[0]?.projection.heartbeat?.state).toBe('unreadable')
+  })
 })
 
 async function callWorkerList(

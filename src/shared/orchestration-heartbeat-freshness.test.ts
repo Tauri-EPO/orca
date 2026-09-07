@@ -58,6 +58,17 @@ describe('dispatch heartbeat freshness', () => {
     expect(projectDispatchHeartbeat(NOW + 4_000, NOW).ageSeconds).toBe(-4)
   })
 
+  // Why: `Math.round(-0.4)` is `-0`, and JSON publishes that as `0`, so anything under half a
+  // second ahead read as "just reported" — the exact reassurance a skewed clock must not buy.
+  it('never publishes a future stamp as a zero age', () => {
+    for (const leadMs of [1, 400, 499, 500]) {
+      const ageSeconds = projectDispatchHeartbeat(NOW + leadMs, NOW).ageSeconds
+      expect(ageSeconds).toBe(-1)
+      expect(JSON.parse(JSON.stringify({ ageSeconds })).ageSeconds).toBe(-1)
+    }
+    expect(projectDispatchHeartbeat(NOW + 1_600, NOW).ageSeconds).toBe(-2)
+  })
+
   it('omits the field entirely when the caller carries no arrival stamp', () => {
     expect(projectOrchestrationFleetWorker(durableWorker(), undefined, NOW)).not.toHaveProperty(
       'heartbeat'
