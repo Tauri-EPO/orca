@@ -33,12 +33,14 @@ export function projectDispatchHeartbeat(
     return { state: 'none', lastReceivedAt: null, ageSeconds: null }
   }
   const ageMs = now - lastReceivedAt
+  const rounded = Math.round(ageMs / 1000)
   // Round the subtraction, never the operands: a stamp ahead of this host's clock stays visible
-  // as a negative age instead of collapsing into a reassuring "just reported" zero.
+  // as a negative age instead of collapsing into a reassuring "just reported" zero. A sub-second
+  // lead rounds to `-0`, which JSON publishes as `0`, so the future branch floors at one second.
   return {
     state: ageMs > DISPATCH_HEARTBEAT_STALE_AFTER_MS ? 'stale' : 'fresh',
     lastReceivedAt,
-    ageSeconds: Math.round(ageMs / 1000)
+    ageSeconds: ageMs < 0 ? Math.min(-1, rounded) : rounded
   }
 }
 

@@ -15,7 +15,9 @@ export function exposeUtcTimestamp(timestamp: string | null): string | null {
  *  written", and the literal (rather than `NaN`) keeps caller arithmetic type-checked and JSON-safe. */
 export function readUtcTimestampMs(timestamp: string | null): number | null | 'unreadable' {
   const exposed = exposeUtcTimestamp(timestamp)
-  if (!exposed) {
+  // Only SQL NULL means "never written". An empty string is a value that was stored and lost its
+  // contents, so it falls through to the parse and is classified as corruption.
+  if (exposed === null) {
     return null
   }
   const parsed = Date.parse(exposed)
