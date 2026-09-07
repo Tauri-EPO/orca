@@ -10,6 +10,11 @@ current or an exact existing workspace by default. Create a worktree only when
 the user requested one or a concrete checkout or filesystem conflict makes
 sharing unsafe.
 
+Decide placement once per Run. Choose where the lanes run when you open the Run
+and reuse that choice for every later `worker-start`; do not re-derive it per
+Task. Tasks decomposed from one objective read as dependent and independent at
+the same time, so a per-Task reading splits one Run across both lineages.
+
 ```text
 # Current workspace; setup is not rerun.
 ORCA orchestration worker-start --task <task_id> --worktree current --agent codex --json
@@ -21,6 +26,7 @@ ORCA orchestration worker-start --task <task_id> --worktree new-child --name <na
 ORCA orchestration worker-start --task <task_id> --worktree new-top-level --name <name> --agent codex --setup run --json
 ```
 
+An omitted `--worktree` resolves to `current`, the coordinator's own workspace.
 Current and exact existing workspaces create a fresh terminal unless
 `--terminal` is explicit. Folder workspaces are first-class; do not invoke Git
 or require worktree lineage when the selected workspace is a folder.
@@ -53,10 +59,11 @@ ORCA orchestration worker-start --task <task_id> --on <environment> --worktree n
 ```
 
 Remote `current` and `new-child` are invalid because they are ambiguous across
-servers. Use an exact discovered remote workspace, or `new-top-level` with an
-exact remote repository selector. After start, route every follow-up, read,
-stop, and cleanup by Dispatch ID; never repeat `--on` or substitute a remote
-terminal handle.
+servers. The `current` default is rejected the same way, so `--on` requires an
+explicit placement: an exact discovered remote workspace, or `new-top-level`
+with an exact remote repository selector. After start, route every follow-up,
+read, stop, and cleanup by Dispatch ID; never repeat `--on` or substitute a
+remote terminal handle.
 
 ```text
 ORCA orchestration worker-show --dispatch <dispatch_id> --json

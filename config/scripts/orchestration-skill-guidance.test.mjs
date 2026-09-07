@@ -367,6 +367,21 @@ describe('owned orchestration references', () => {
     )
   })
 
+  it('binds placement to the Run and states what an omitted --worktree resolves to', () => {
+    const reference = squash(readReference('placement-and-remote.md'))
+
+    expect(reference).toContain('Decide placement once per Run')
+    expect(reference).toContain('do not re-derive it per Task')
+    expect(reference).toContain('a per-Task reading splits one Run across both lineages')
+    expect(reference).toContain(
+      "An omitted `--worktree` resolves to `current`, the coordinator's own workspace"
+    )
+    // Remote start has no usable default: the resolved `current` is rejected.
+    expect(reference).toContain(
+      'The `current` default is rejected the same way, so `--on` requires an explicit placement'
+    )
+  })
+
   it('owns FIFO mail, Dispatch addresses, groups, questions, and gates', () => {
     const reference = readReference('messaging-and-gates.md')
 
