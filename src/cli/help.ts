@@ -1,5 +1,6 @@
 import type { CommandSpec } from './args'
 import { findCommandSpec, isCommandGroup, matches, supportsBrowserPageFlag } from './args'
+import { formatFlagHelpRows, resolveFlagHelp } from './command-flag-help-layout'
 import { unknownCommandData } from './command-suggestion'
 import { formatCommandScopedFlagHelp } from './command-scoped-flag-help'
 import { FLAG_HELP_TEXT } from './flag-help-text'
@@ -40,9 +41,10 @@ export function formatCommandHelp(spec: CommandSpec): string {
 
   if (displayedFlags.length > 0) {
     lines.push('', 'Options:')
-    for (const flag of displayedFlags) {
-      lines.push(`  ${formatCommandFlagHelp(flag, spec.path)}`)
-    }
+    const rows = displayedFlags.map((flag) =>
+      resolveFlagHelp(flag, spec.flagHelp?.[flag], formatCommandFlagHelp(flag, spec.path))
+    )
+    lines.push(...formatFlagHelpRows(rows))
   }
 
   if (spec.notes && spec.notes.length > 0) {
@@ -79,7 +81,7 @@ export function formatGroupHelp(specs: CommandSpec[], groupPath: string[]): stri
   return lines.join('\n')
 }
 
-function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
+export function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
   const command = commandPath.join(' ')
   const scopedHelp = formatCommandScopedFlagHelp(command, flag)
   if (scopedHelp) {
