@@ -114,20 +114,8 @@ export function formatCommandFlagHelp(flag: string, commandPath: string[]): stri
   if (command === 'artifacts list' && flag === 'cursor') {
     return '--cursor <cursor>      Opaque cursor returned by a previous artifacts page'
   }
-  if (command === 'orchestration worker-read' && flag === 'cursor') {
-    return '--cursor <cursor>      Opaque cursor returned by a previous worker-read page'
-  }
-  if (command === 'orchestration worker-list' && flag === 'cursor') {
-    return '--cursor <cursor>      Opaque page cursor copied from page.nextCursor'
-  }
-  if (command === 'orchestration worker-list' && flag === 'terminal-state') {
-    return '--terminal-state <state> Terminal accounting filter: active, reclaimable, retained, release_pending, release_unknown, or released'
-  }
   if (command === 'skills get' && flag === 'full') {
     return '--full                 Print the full guide with bundled references'
-  }
-  if (command === 'orchestration worker-list' && flag === 'include-remote') {
-    return '--include-remote      Include connected-server worker observations'
   }
   if (command === 'linear list-issues' && flag === 'workspace') {
     return '--workspace <id|all>  Connected Linear workspace id, or all'
@@ -170,12 +158,6 @@ export function formatCommandFlagHelp(flag: string, commandPath: string[]): stri
   }
   if (command === 'worktree create' && flag === 'parent-worktree') {
     return '--parent-worktree <selector> Parent selector such as identity:<identity>, active/current, id:<repo-id>::<path>, branch:<branch>, issue:<number>, path:<path>, folder:<id>, or worktree:<worktreeId>'
-  }
-  if (command === 'orchestration task-create' && flag === 'task-title') {
-    return '--task-title <text>  Concise title for the orchestration task'
-  }
-  if (command === 'orchestration task-create' && flag === 'display-name') {
-    return '--display-name <text> UI label shown for dispatched worker rows'
   }
   // Why: the shared --agent help describes launching a TUI agent in a terminal,
   // which is the wrong meaning here — this selects the account provider.
