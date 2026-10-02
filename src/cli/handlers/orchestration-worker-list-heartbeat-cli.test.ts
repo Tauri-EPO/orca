@@ -46,13 +46,12 @@ async function renderWorkerList(response: WorkerListResponse): Promise<string | 
   callMock.mockResolvedValue(response)
   await ORCHESTRATION_HANDLERS['orchestration worker-list']({
     flags: new Map<string, string | boolean>(),
-    client: { call: callMock },
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: worker-list reads only `call`; RuntimeClient is a class, so a structural double cannot satisfy it without the cast.
+    client: { call: callMock } as never,
     cwd: '/tmp/repo',
     json: false
-  } as never)
-  const formatter = vi.mocked(printResult).mock.calls[0]?.[2] as
-    | ((result: WorkerListResponse['result']) => string)
-    | undefined
+  })
+  const formatter = vi.mocked(printResult).mock.calls[0]?.[2]
   return formatter?.(response.result)
 }
 

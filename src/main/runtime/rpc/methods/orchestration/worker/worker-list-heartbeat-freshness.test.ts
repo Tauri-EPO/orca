@@ -1,19 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type Database from '../../../../../sqlite/sync-database'
 import { OrchestrationDb } from '../../../../orchestration/db'
 import { OrcaRuntimeService } from '../../../../orca-runtime'
 import { DISPATCH_HEARTBEAT_STALE_AFTER_MS } from '../../../../../../shared/orchestration-heartbeat-freshness'
 import { ORCHESTRATION_WORKER_LIST_METHOD } from './worker-list-method'
-
-type HeartbeatListResult = {
-  workers: {
-    dispatchId: string
-    projection: {
-      liveness: { verdict: string }
-      heartbeat?: { state: string; lastReceivedAt: number | null; ageSeconds: number | null }
-    }
-  }[]
-}
 
 describe('orchestration worker-list heartbeat freshness', () => {
   let db: OrchestrationDb | undefined
@@ -112,7 +101,7 @@ describe('orchestration worker-list heartbeat freshness', () => {
     })
     insertDispatch(db, run.id, 'ctx_silent')
     insertDispatch(db, run.id, 'ctx_corrupt')
-    sqliteFor(db)
+    db.db
       .prepare('UPDATE dispatch_contexts SET last_heartbeat_at = ? WHERE id = ?')
       .run('not-a-timestamp', 'ctx_corrupt')
 
@@ -139,7 +128,7 @@ describe('orchestration worker-list heartbeat freshness', () => {
       coordinatorPaneKey: 'tab-coordinator:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
     })
     insertDispatch(db, run.id, 'ctx_empty')
-    sqliteFor(db)
+    db.db
       .prepare('UPDATE dispatch_contexts SET last_heartbeat_at = ? WHERE id = ?')
       .run('', 'ctx_empty')
 
@@ -149,27 +138,18 @@ describe('orchestration worker-list heartbeat freshness', () => {
   })
 })
 
-async function callWorkerList(
-  runtime: OrcaRuntimeService,
-  params: Record<string, unknown>
-): Promise<HeartbeatListResult> {
+async function callWorkerList(runtime: OrcaRuntimeService, params: Record<string, unknown>) {
   const parsed = ORCHESTRATION_WORKER_LIST_METHOD.params?.parse(params)
-  return (await ORCHESTRATION_WORKER_LIST_METHOD.handler(parsed, {
-    runtime
-  })) as HeartbeatListResult
+  return ORCHESTRATION_WORKER_LIST_METHOD.handler(parsed, { runtime })
 }
 
 function insertDispatch(db: OrchestrationDb, runId: string, dispatchId: string): void {
   const task = db.createTask({ spec: dispatchId, runId })
-  sqliteFor(db)
+  db.db
     .prepare(
       `INSERT INTO dispatch_contexts (
          id, run_id, task_id, assignee_handle, status, created_at
        ) VALUES (?, ?, ?, ?, 'dispatched', '2026-08-27 00:00:00')`
     )
     .run(dispatchId, runId, task.id, `term-${dispatchId}`)
-}
-
-function sqliteFor(db: OrchestrationDb): Database.Database {
-  return (db as unknown as { db: Database.Database }).db
 }
