@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_DELIVERY_BATCH_LIMIT, OrchestrationDb } from './db'
 import { createRootDispatch } from './db/root-dispatch-test-fixture'
 import { reconcileLifecycleMessage } from './lifecycle-reconciliation'
 import { selectOrchestrationPointerBatch } from './mailbox-pointer-eligibility'
+import {
+  OrchestrationStructuredMailboxPointerDelivery,
+  type StructuredMailboxPointerHost
+} from './structured-mailbox-pointer-delivery'
 import type { DispatchContextRow, MessageRow } from './types'
 
 /**
@@ -120,5 +124,66 @@ describe('heartbeat push silence', () => {
     })
 
     expect(pointerBatch(fixture).map((m) => m.id)).toEqual([done.id])
+  })
+})
+
+describe('heartbeat push silence on the structured-session lane', () => {
+  let fixture: Fixture | undefined
+
+  afterEach(() => fixture?.db.close())
+
+  // A structured coordinator owns its `run:` mailbox through this lane, so it must share the filter.
+  function structuredCoordinatorLane({ db, mailbox }: Fixture) {
+    const send = vi.fn<StructuredMailboxPointerHost['send']>(async () => ({
+      kind: 'sent',
+      state: 'accepted'
+    }))
+    const delivery = new OrchestrationStructuredMailboxPointerDelivery({
+      getDb: () => db,
+      getMessageWaiters: () => undefined,
+      resolveStructuredTarget: (handle) =>
+        handle === mailbox ? { sessionId: 'session-c', dispatchId: null } : null,
+      getCliCommand: () => 'orca-dev',
+      host: {
+        readGateFacts: async () => ({ turnRunning: false, awaitingHuman: false, submissions: [] }),
+        currentFence: () => 1,
+        send
+      }
+    })
+    return { delivery, send }
+  }
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('does not spend a coordinator turn on a recorded heartbeat', async () => {
+    fixture = dispatched()
+    sendHeartbeat(fixture)
+    const { delivery, send } = structuredCoordinatorLane(fixture)
+
+    delivery.deliverForHandle(fixture.mailbox)
+    await flush()
+
+    expect(send).not.toHaveBeenCalled()
+    expect(fixture.db.getUnreadMessages(fixture.mailbox).map((m) => m.type)).toEqual(['heartbeat'])
+  })
+
+  it('consumes only the non-heartbeat mail it pushed', async () => {
+    fixture = dispatched()
+    const heartbeat = sendHeartbeat(fixture)
+    const escalation = fixture.db.insertMessage({
+      from: WORKER,
+      to: fixture.mailbox,
+      subject: 'blocked on a decision',
+      type: 'escalation'
+    })
+    const { delivery, send } = structuredCoordinatorLane(fixture)
+
+    delivery.deliverForHandle(fixture.mailbox)
+    await flush()
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const pending = fixture.db.getUndeliveredUnreadMessages(fixture.mailbox).map((m) => m.id)
+    expect(pending).toContain(heartbeat.id)
+    expect(pending).not.toContain(escalation.id)
   })
 })
